@@ -744,9 +744,10 @@ def non_max_suppression(prediction,
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
+    print("Calling the default non_max_suppression")
 
     bs = prediction.shape[0]  # batch size
-    nc = prediction.shape[2] - 5  # number of classes
+    nc = prediction.shape[2] - 5  # number of classes  ## first 5 elements in this dimension2 might be xyxy & score
     xc = prediction[..., 4] > conf_thres  # candidates
 
     # Checks
@@ -767,7 +768,7 @@ def non_max_suppression(prediction,
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints
         # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height
-        x = x[xc[xi]]  # confidence
+        x = x[xc[xi]]  # confidence  ## filter out low-confidence bboxes
 
         # Cat apriori labels if autolabelling
         if labels and len(labels[xi]):
@@ -789,7 +790,7 @@ def non_max_suppression(prediction,
         box = xywh2xyxy(x[:, :4])
 
         # Detections matrix nx6 (xyxy, conf, cls)
-        if multi_label:
+        if multi_label:  ## not using multi-label
             i, j = (x[:, 5:] > conf_thres).nonzero(as_tuple=False).T
             x = torch.cat((box[i], x[i, j + 5, None], j[:, None].float()), 1)
         else:  # best class only
@@ -814,7 +815,12 @@ def non_max_suppression(prediction,
         # Batched NMS
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-        i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        # i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        # ## i is a tensor with the indices of the elements that have been kept by NMS, sorted in decreasing order of scores
+        
+        ## not applying default nms, we keep the entire tensor x
+        i = torch.tensor(range(x.shape[0]))
+
         if i.shape[0] > max_det:  # limit detections
             i = i[:max_det]
         if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)

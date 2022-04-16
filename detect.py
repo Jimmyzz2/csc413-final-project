@@ -46,6 +46,11 @@ from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, time_sync
 
 
+## import seq_nms cloned from repo https://github.com/tmoopenn/seq-nms
+from seq_nms import seq_nms
+## module_name = __import__('/content/yolov5/seq-nms/seq_nms.py')  ## didn't work
+
+
 @torch.no_grad()
 def run(
         weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
@@ -57,9 +62,9 @@ def run(
         max_det=1000,  # maximum detections per image
         device='',  # cuda device, i.e. 0 or 0,1,2,3 or cpu
         view_img=False,  # show results
-        save_txt=False,  # save results to *.txt
-        save_conf=False,  # save confidences in --save-txt labels
-        save_crop=False,  # save cropped prediction boxes
+        save_txt=True,  # save results to *.txt  ## changed default to True
+        save_conf=True,  # save confidences in --save-txt labels  ## changed default to True
+        save_crop=True,  # save cropped prediction boxes  ## changed default to True
         nosave=False,  # do not save images/videos
         classes=None,  # filter by class: --class 0, or --class 0 2 3
         agnostic_nms=False,  # class-agnostic NMS
@@ -101,12 +106,20 @@ def run(
         bs = len(dataset)  # batch_size
     else:
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
-        bs = 1  # batch_size
+        bs = 1  # batch_size  ## Can modify batch_size or add as command line argument
     vid_path, vid_writer = [None] * bs, [None] * bs
 
     # Run inference
     model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
     dt, seen = [0.0, 0.0, 0.0], 0
+
+    ## tensor for storing all bbox detections for all images in the sequence
+    ## this is the input tensor to seq_nms()
+    ## len(dataset) == num_frames
+    seq_bboxes = []  ## make into tensor of shape (num_frames, num_boxes, 4)
+    seq_scores = []  ## make into tensor of shape (num_frames, num_boxes)
+    max_num_bboxes = 0
+
     for path, im, im0s, vid_cap, s in dataset:
         t1 = time_sync()
         im = torch.from_numpy(im).to(device)
@@ -126,6 +139,12 @@ def run(
         # NMS
         pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
         dt[2] += time_sync() - t3
+
+        bboxes = pred[0][..., :4]
+        scores = pred[0][..., 4]
+        seq_bboxes.append(bboxes)
+        seq_scores.append(scores)
+        max_num_bboxes = max(max_num_bboxes, bboxes.shape[0])
 
         # Second-stage classifier (optional)
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
@@ -197,6 +216,21 @@ def run(
 
         # Print time (inference-only)
         LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
+
+    ## pad seq_bboxes and seq_scores with zeros by difference between max_num_bboxes and current seq_bboxes's frame
+    # len(seq_bboxes)==len(seq_scores)==len(dataset)==the number of image frames in the sequence
+    padded_bboxes = torch.zeros(len(seq_bboxes), max_num_bboxes, 4)
+    padded_scores = torch.zeros(len(seq_bboxes), max_num_bboxes)
+    for i in range(len(seq_bboxes)): # frame
+        num_bboxes_this_frame = seq_bboxes[i].shape[0]
+        padded_scores[i][:num_bboxes_this_frame] = seq_scores[i]
+        for j in range(seq_bboxes[i].shape[0]): # max_bbox
+            padded_bboxes[i][j][:num_bboxes_this_frame] = seq_bboxes[i][j]
+    
+    print(padded_bboxes)
+    print(padded_scores)
+    
+    seq_nms(padded_bboxes, padded_scores)
 
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
