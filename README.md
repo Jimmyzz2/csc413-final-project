@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <div align="center">
 <p>
    <a align="left" href="https://ultralytics.com/yolov5" target="_blank">
@@ -302,3 +303,6 @@ professional support requests please visit [https://ultralytics.com/contact](htt
         <img src="https://github.com/ultralytics/yolov5/releases/download/v1.0/logo-social-instagram.png" width="3%"/>
     </a>
 </div>
+=======
+# CSC413 Final Project: Video Object Recognition
+>>>>>>> f5752d5925dd5a9d7a0d30be5c5a59556db6b3c8
