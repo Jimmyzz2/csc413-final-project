@@ -239,7 +239,11 @@ def run(
                 f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score}\n')
 
 
-    ## TODO: use the class label for seq_nms() and save the results to file        
+    ## TODO: use the class label for seq_nms() and save the results to file 
+    # TODO: visualize the seq_nms results
+
+
+    # evaluate seq_nms output
 
 
     # Print results
