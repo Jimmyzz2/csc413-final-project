@@ -29,7 +29,8 @@ def seq_nms(boxes, scores, labels=None, linkage_threshold=0.5, nms_threshold=0.3
     # use filtered boxes and scores to create nms graph across frames 
     box_graph = build_box_sequences(boxes, scores, labels, linkage_threshold=linkage_threshold)
     print("BOX GRAPH SHAPE", box_graph.shape)
-    _seq_nms(box_graph, boxes, scores, nms_threshold, score_metric=score_metric)
+    best_seqs = _seq_nms(box_graph, boxes, scores, nms_threshold, score_metric=score_metric)
+    return best_seqs
 
 def build_box_sequences(boxes, scores, labels, linkage_threshold=0.5):
     ''' Build bounding box sequences across frames. A sequence is a set of boxes that are linked in a video
@@ -73,10 +74,7 @@ def build_box_sequences(boxes, scores, labels, linkage_threshold=0.5):
 
         for i, box in enumerate(boxes_f):
             # overlaps = compute_overlap_areas_given(np.expand_dims(box,axis=0).astype(np.double), boxes_f1.astype(np.double), areas_f1.astype(np.double) )[0]
-            print("box", torch.unsqueeze(box, 0))
-            print("boxes_f1", boxes_f1)
             overlaps = box_iou(torch.unsqueeze(box, 0), boxes_f1).squeeze()
-            print("overlaps", overlaps)
 
             # add linkage if IoU greater than threshold and boxes have same labels i.e class  
             if len(labels) == 0 :
@@ -225,14 +223,28 @@ def _seq_nms(box_graph, boxes, scores, nms_threshold, score_metric='avg'):
     Returns 
         None
     '''
+    best_seqs = {}  # value is a list of (bboxes,score) tuples for each frame, key with frame_idx
+    ## best_seqs = {frame_id1: [(bbox, adjusted_scores), ...], frame_id2: [...], ...} 
+    
     while True: 
         sequence_frame_index, best_sequence, best_score = find_best_sequence(box_graph, scores)
         print(best_sequence, best_score)
+
         if len(best_sequence) <= 1:
             break 
-        rescore_sequence(best_sequence, scores, sequence_frame_index, best_score, score_metric=score_metric)
+        rescore_sequence(best_sequence, scores, sequence_frame_index, best_score, score_metric='max')
         delete_sequence(best_sequence, sequence_frame_index, scores, boxes, box_graph, suppress_threshold=nms_threshold)
         
+        ## save best sequence bboxes and adjusted_scores
+        for i, box_idx in enumerate(best_sequence):
+            frame_id = sequence_frame_index + i
+            if sequence_frame_index + i not in best_seqs: 
+                best_seqs[frame_id] = []
+            best_seqs[frame_id].append((boxes[frame_id][box_idx], scores[frame_id][box_idx]))
+    
+    print(best_seqs)
+    return best_seqs
+
 
 #if __name__ == "__main__":
     #boxes = np.load('/path/to/boxes')
