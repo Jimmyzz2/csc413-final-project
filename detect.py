@@ -62,9 +62,9 @@ def run(
         max_det=1000,  # maximum detections per image
         device='',  # cuda device, i.e. 0 or 0,1,2,3 or cpu
         view_img=False,  # show results
-        save_txt=True,  # save results to *.txt  ## changed default to True
-        save_conf=True,  # save confidences in --save-txt labels  ## changed default to True
-        save_crop=True,  # save cropped prediction boxes  ## changed default to True
+        save_txt=False,  # save results to *.txt
+        save_conf=False,  # save confidences in --save-txt labels
+        save_crop=False,  # save cropped prediction boxes
         nosave=False,  # do not save images/videos
         classes=None,  # filter by class: --class 0, or --class 0 2 3
         agnostic_nms=False,  # class-agnostic NMS
@@ -178,6 +178,7 @@ def run(
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        ## Can save a different version into txt
                         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
                         with open(txt_path + '.txt', 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
@@ -226,11 +227,20 @@ def run(
         padded_scores[i][:num_bboxes_this_frame] = seq_scores[i]
         for j in range(seq_bboxes[i].shape[0]): # max_bbox
             padded_bboxes[i][j][:num_bboxes_this_frame] = seq_bboxes[i][j]
+
+    best_seqs = seq_nms(padded_bboxes, padded_scores)
+    # seq_nms() updates padded_bboxes and padded_scores
+    # seq_nms() returns a dictionary of key being the frame_idx and value is list of tuples (bbox, score)
     
-    print(padded_bboxes)
-    print(padded_scores)
-    
-    seq_nms(padded_bboxes, padded_scores)
+    ## save best_seqs into file
+    with open(str(save_dir / 'seq_nms_results.txt'), 'a') as f:
+        for frame_idx, seq in best_seqs.items():
+            for bbox, score in seq:
+                f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score}\n')
+
+
+    ## TODO: use the class label for seq_nms() and save the results to file        
+
 
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
