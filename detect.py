@@ -45,10 +45,9 @@ from utils.general import (LOGGER, check_file, check_img_size, check_imshow, che
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, time_sync
 
-
-## import seq_nms cloned from repo https://github.com/tmoopenn/seq-nms
-from seq_nms import seq_nms
-## module_name = __import__('/content/yolov5/seq-nms/seq_nms.py')  ## didn't work
+from seq_nms import seq_nms  ## import seq_nms cloned from repo https://github.com/tmoopenn/seq-nms
+from torchvision.ops import box_iou
+import matplotlib.pyplot as plt
 
 
 @torch.no_grad()
@@ -228,22 +227,80 @@ def run(
         for j in range(seq_bboxes[i].shape[0]): # max_bbox
             padded_bboxes[i][j][:num_bboxes_this_frame] = seq_bboxes[i][j]
 
-    best_seqs = seq_nms(padded_bboxes, padded_scores)
+    best_pred_bboxes_seq = seq_nms(padded_bboxes, padded_scores)
     # seq_nms() updates padded_bboxes and padded_scores
-    # seq_nms() returns a dictionary of key being the frame_idx and value is list of tuples (bbox, score)
-    
-    ## save best_seqs into file
-    with open(str(save_dir / 'seq_nms_results.txt'), 'a') as f:
-        for frame_idx, seq in best_seqs.items():
-            for bbox, score in seq:
-                f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score}\n')
 
+    # turn into a dictionary of key as frame_idx, and value as list of tuples (x1,y1,x2,y2,score)
+    pred_bboxes_seq = {}
+    ## and save best_seqs into file
+    with open(str(save_dir / 'seq_nms_results.txt'), 'a') as f:
+        for frame_idx, seq in best_pred_bboxes_seq.items():  # key value pair
+            pred_bboxes_seq[frame_idx] = []
+            for bbox, score in seq:
+                pred_bboxes_seq[frame_idx].append((bbox[0], bbox[1], bbox[2], bbox[3], score))
+                f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame
+            f.write('\n')
 
     ## TODO: use the class label for seq_nms() and save the results to file 
     # TODO: visualize the seq_nms results
 
-
     # evaluate seq_nms output
+
+    gt_bboxes_seq = {}
+    num_gt = 0
+    with open("turtle3_gt.txt", "r") as f:
+        frame_idx = 0
+        while True:  # while not at bottom of file
+            # read line
+            line = f.readline()  # represents one frame
+            # line = "val/ILSVRC2015_val_00000003/000083.JPEG 353,0,728,501,26 741,163,1045,552,26"
+            print(line)
+            # if line is empty (reaching end of file), break
+            if not line:
+                f.close()
+                break
+            # split line into list
+            line = line.split(' ')
+            img_path = line[0]
+            gt_bboxes_seq[frame_idx] = []
+            for bbox in line[1:]:  # each bbox in the frame
+                x1, y1, x2, y2, score = [int(x) for x in bbox.split(',')]
+                gt_bboxes_seq[frame_idx].append((x1, y1, x2, y2, score))
+                num_gt += 1
+
+            frame_idx += 1
+    print("pred_bboxes_seq: ", pred_bboxes_seq)
+    print("gt_bboxes_seq: ", gt_bboxes_seq)
+
+    # get the number of true postives, number of detections (pred) and number of gt bboxes in the sequence
+    num_tp = 0
+    num_pred = 0
+    precision_lst = []
+    recall_lst = []
+    for frame_idx in range(len(gt_bboxes_seq)):  # gt_bboxes_seq contains all the frames including frames with no gt bboxes
+        # if IoU of predicted bbox and gt bbox is greater than threshold, then it is a true positive
+        num_pred += len(pred_bboxes_seq[frame_idx])
+        for pred_bbox in pred_bboxes_seq[frame_idx]:
+            tensor_pred_bbox = torch.tensor(pred_bbox[:-1]).unsqueeze(0)
+            for gt_bbox in gt_bboxes_seq[frame_idx]:
+                tensor_gt_bbox = torch.tensor(gt_bbox[:-1]).unsqueeze(0)
+                iou_pred_gt = box_iou(tensor_pred_bbox, tensor_gt_bbox).squeeze().item()
+                if iou_pred_gt > 0.8:  # TODO: try different thresholds
+                    num_tp += 1
+                    break
+            precision_lst.append(num_tp / num_pred)
+            recall_lst.append(num_tp / num_gt)
+    
+    print("precision_lst: ", precision_lst)
+    print("recall_lst: ", recall_lst)
+
+    # calculate the average precision (area under PR curve) for all sequences
+    # plot pr curve
+    plt.plot(recall_lst, precision_lst)
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.savefig('PR_curve.png')
+    
 
 
     # Print results
