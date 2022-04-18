@@ -1,8 +1,4 @@
-class_id_to_index = {'n02691156': 1, 'n02419796': 2, 'n02131653': 3, 'n02834778': 4, 'n01503061': 5, 'n02924116':
-    6, 'n02958343': 7, 'n02402425': 8, 'n02084071': 9, 'n02121808': 10, 'n02503517': 11, 'n02118333': 12,
-    'n02510455': 13, 'n02342885': 14, 'n02374451': 15, 'n02129165': 16, 'n01674464': 17,
-    'n02484322': 18, 'n03790512': 19, 'n02324045': 20, 'n02509815': 21, 'n02411705': 22, 'n01726692': 23,
-    'n02355227': 24, 'n02129604': 25, 'n04468005': 26, 'n01662784': 27, 'n04530566': 28, 'n02062744': 29, 'n02391049': 30}
+class_id_to_index = {'n02691156': 0, 'n02419796': 1, 'n02131653': 2, 'n02834778': 3, 'n01503061': 4, 'n02924116': 5, 'n02958343': 6, 'n02402425': 7, 'n02084071': 8, 'n02121808': 9, 'n02503517': 10, 'n02118333': 11, 'n02510455': 12, 'n02342885': 13, 'n02374451': 14, 'n02129165': 15, 'n01674464': 16, 'n02484322': 17, 'n03790512': 18, 'n02324045': 19, 'n02509815': 20, 'n02411705': 21, 'n01726692': 22, 'n02355227': 23, 'n02129604': 24, 'n04468005': 25, 'n01662784': 26, 'n04530566': 27, 'n02062744': 28, 'n02391049': 29}
 
 import xml.etree.ElementTree as ET
 import torch
@@ -91,22 +87,31 @@ if __name__ == "__main__":
 
 
     # extract one image from each training sequence
-    for i, filename in enumerate(os.listdir('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val')): # e.g. ILSVRC2015_VID_train_00000000
-        f = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val', filename)
+    VID_val_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val'
+    VID_train_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000'
+    VID_train_ann_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/train/ILSVRC2015_VID_train_0000'
+    VID_val_ann_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/val'
+    output_train_image_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/train/'
+    output_val_image_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/val/'
+    output_train_label_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/train/'
+    output_val_label_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/val/'
+
+    for i, filename in enumerate(os.listdir(VID_train_dir)): # e.g. ILSVRC2015_VID_train_00000000
+        f = os.path.join(VID_train_dir, filename)
         if os.path.isdir(f):
             end_part_image_0_name = filename + '-' + os.listdir(f)[0]  # e.g. ILSVRC2015_train_00000000-000000.JPEG
             end_part_image_0 = os.path.join(filename, os.listdir(f)[0]) # e.g. ILSVRC2015_train_00000000/000000.JPEG
-            image_0 = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val', end_part_image_0)
+            image_0 = os.path.join(VID_train_dir, end_part_image_0)
             # print(image_0)
-            image_0_annotation = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/val', end_part_image_0)[:-4] + "xml"
+            image_0_annotation = os.path.join(VID_train_ann_dir, end_part_image_0)[:-4] + "xml"
             # print(image_0_annotation)
-            image_0_dest = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/val/' + end_part_image_0_name
+            image_0_dest = output_train_image_dir + end_part_image_0_name
             # print(image_0_dest)
             shutil.copyfile(
                 image_0,
                 image_0_dest,
                 follow_symlinks=True)
-            image_0_text = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/val/' + end_part_image_0_name[:-4] + "txt"
+            image_0_text = output_train_label_dir + end_part_image_0_name[:-4] + "txt"
             # print(image_0_text)
             write_label_to_txt(image_0_text, annotation_to_label(image_0_annotation))
 
