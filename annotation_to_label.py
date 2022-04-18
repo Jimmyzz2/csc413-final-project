@@ -91,22 +91,22 @@ if __name__ == "__main__":
 
 
     # extract one image from each training sequence
-    for i, filename in enumerate(os.listdir('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000')): # e.g. ILSVRC2015_VID_train_00000000
-        f = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000', filename)
+    for i, filename in enumerate(os.listdir('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val')): # e.g. ILSVRC2015_VID_train_00000000
+        f = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val', filename)
         if os.path.isdir(f):
             end_part_image_0_name = filename + '-' + os.listdir(f)[0]  # e.g. ILSVRC2015_train_00000000-000000.JPEG
             end_part_image_0 = os.path.join(filename, os.listdir(f)[0]) # e.g. ILSVRC2015_train_00000000/000000.JPEG
-            image_0 = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000', end_part_image_0)
+            image_0 = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val', end_part_image_0)
             # print(image_0)
-            image_0_annotation = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/train/ILSVRC2015_VID_train_0000', end_part_image_0)[:-4] + "xml"
+            image_0_annotation = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/val', end_part_image_0)[:-4] + "xml"
             # print(image_0_annotation)
-            image_0_dest = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/train/' + end_part_image_0_name
+            image_0_dest = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/val/' + end_part_image_0_name
             # print(image_0_dest)
             shutil.copyfile(
                 image_0,
                 image_0_dest,
                 follow_symlinks=True)
-            image_0_text = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/train/' + end_part_image_0_name[:-4] + "txt"
+            image_0_text = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/val/' + end_part_image_0_name[:-4] + "txt"
             # print(image_0_text)
             write_label_to_txt(image_0_text, annotation_to_label(image_0_annotation))
 
