@@ -253,13 +253,14 @@ def _seq_nms(box_graph, boxes, scores, nms_threshold, score_metric='avg'):
         next_frame_idx = lst_frame_idx[lst_frame_idx.index(frame_idx) + 1]
         print("frame_idx:", frame_idx, " next_frame_idx:", next_frame_idx)
         if len(best_seqs[frame_idx]) > 0 and len(best_seqs[next_frame_idx]) > 0:
+            ## TODO: last_frame_bbox should be the last frame in the linkage i.e. identify gap in linkages!! not going by consecutive frames
             last_frame_bbox = best_seqs[frame_idx][-1][0]  # tensor of shape (1, 4) containing xyxy
             first_frame_bbox = best_seqs[next_frame_idx][0][0]  # tensor of shape (1, 4) containing xyxy
             print("last_frame_bbox:", last_frame_bbox, " first_frame_bbox:", first_frame_bbox)
             best_seqs_iou = box_iou(torch.unsqueeze(last_frame_bbox, dim=0), torch.unsqueeze(first_frame_bbox, dim=0)).squeeze()
             # TODO: or iou between any bbox in best_seqs[frame_idx] and best_seqs[next_frame_idx] exceeding threshold
             # TODO: maybe there is a middle frame with detection, connect it to the 2 linkages / polish up middle frames estimations
-            if best_seqs_iou > 0.5:
+            if best_seqs_iou > 0.5:  #TODO: try other thresholds
                 # find new max score
                 bbox1_max_score = max([bbox[1] for bbox in best_seqs[frame_idx]])
                 bbox2_max_score = max([bbox[1] for bbox in best_seqs[next_frame_idx]])
