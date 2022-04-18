@@ -69,9 +69,14 @@ def write_label_to_txt(filename, label):
 
 
 if __name__ == "__main__":
-    write_label_to_txt(
-        '/Users/jimmyzhan/Documents/csc413/csc413-final-project/ILSVRC2015/Annotations/VID/train/label.txt',
-        annotation_to_label('/Users/jimmyzhan/Documents/csc413/csc413-final-project/ILSVRC2015/Annotations/VID/train/000000.xml'))
+    import os
+    for xml_filename in os.listdir(
+            '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/val'):
+        f = os.path.join('/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/val',
+                         xml_filename)
+        if os.path.isfile(f):
+            if f.endswith('.xml'):
+                write_label_to_txt(f[:-3] + "txt", annotation_to_label(f))
 
 
 
