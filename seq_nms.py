@@ -228,7 +228,7 @@ def _seq_nms(box_graph, boxes, scores, nms_threshold, score_metric='avg'):
     
     while True: 
         sequence_frame_index, best_sequence, best_score = find_best_sequence(box_graph, scores)
-        print(best_sequence, best_score)
+        print("sequence_frame_index: ", sequence_frame_index, "best_score: ", best_score, "best_sequence: ", best_sequence)
 
         if len(best_sequence) <= 1:
             break 

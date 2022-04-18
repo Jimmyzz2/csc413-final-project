@@ -221,11 +221,11 @@ def run(
     # len(seq_bboxes)==len(seq_scores)==len(dataset)==the number of image frames in the sequence
     padded_bboxes = torch.zeros(len(seq_bboxes), max_num_bboxes, 4)
     padded_scores = torch.zeros(len(seq_bboxes), max_num_bboxes)
-    for i in range(len(seq_bboxes)): # frame
+    for i in range(len(seq_bboxes)): # each frame
         num_bboxes_this_frame = seq_bboxes[i].shape[0]
         padded_scores[i][:num_bboxes_this_frame] = seq_scores[i]
-        for j in range(seq_bboxes[i].shape[0]): # max_bbox
-            padded_bboxes[i][j][:num_bboxes_this_frame] = seq_bboxes[i][j]
+        for j in range(seq_bboxes[i].shape[0]): # each bbox in the frame
+            padded_bboxes[i][j] = seq_bboxes[i][j]
 
     best_pred_bboxes_seq = seq_nms(padded_bboxes, padded_scores)
     # seq_nms() updates padded_bboxes and padded_scores
@@ -248,7 +248,7 @@ def run(
 
     gt_bboxes_seq = {}
     num_gt = 0
-    with open("turtle3_gt.txt", "r") as f:
+    with open("turtle20_gt.txt", "r") as f:  # TODO: change to command line arg or etc.
         frame_idx = 0
         while True:  # while not at bottom of file
             # read line
@@ -277,10 +277,11 @@ def run(
     num_pred = 0
     precision_lst = []
     recall_lst = []
-    for frame_idx in range(len(gt_bboxes_seq)):  # gt_bboxes_seq contains all the frames including frames with no gt bboxes
+    for frame_idx in pred_bboxes_seq:
         # if IoU of predicted bbox and gt bbox is greater than threshold, then it is a true positive
-        num_pred += len(pred_bboxes_seq[frame_idx])
-        for pred_bbox in pred_bboxes_seq[frame_idx]:
+        pred_bboxes_frame = pred_bboxes_seq[frame_idx]
+        num_pred += len(pred_bboxes_frame)
+        for pred_bbox in pred_bboxes_frame:
             tensor_pred_bbox = torch.tensor(pred_bbox[:-1]).unsqueeze(0)
             for gt_bbox in gt_bboxes_seq[frame_idx]:
                 tensor_gt_bbox = torch.tensor(gt_bbox[:-1]).unsqueeze(0)
