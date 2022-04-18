@@ -30,23 +30,35 @@ def extract_from_xml(filename):
     height = int(root[3][1].text)
     # extract detections (tag with name equals object)
     annotation = []  # contains [x1, y1, x2, y2] unnormalized
-    index = []  # contains id
+    index = [] # contains id
     for elem in root:
         if elem.tag == "object":
-            index.append([int(class_id_to_index[elem[1].text])])
+            index.append(torch.tensor([int(class_id_to_index[elem[1].text])]))
             xmax = float(elem[2][0].text)
             xmin = float(elem[2][1].text)
             ymax = float(elem[2][2].text)
             ymin = float(elem[2][3].text)
-            annotation.append([xmin, ymin, xmax, ymax])
-    return [torch.tensor(annotation), torch.tensor(index), width, height]
+            annotation.append(torch.tensor([xmin, ymin, xmax, ymax]))
+    # print(annotation)
+    # print(annotation.shape)
+    # print(annotation)
+    # print(torch.stack(annotation, dim=0))
+    # print(torch.stack(index, dim=0))
+    if (len(annotation) == 0):
+        return False
+
+    return [torch.stack(annotation, dim=0), torch.stack(index, dim=0), width, height]
 
 def annotation_to_label(filename):
     # convert annotation to label
-    annotation, index, width, height = extract_from_xml(filename)
-    label = xyxy2xywhn(annotation, width, height)  # num_detections x4 with [index, x, y, w, h]
-    label = torch.cat([index, label], dim=1)
-    return label
+    info = extract_from_xml(filename)
+    if info:
+        annotation, index, width, height = info
+        label = xyxy2xywhn(annotation, width, height)  # num_detections x4 with [index, x, y, w, h]
+        label = torch.cat([index, label], dim=1)
+        return label
+    else:
+        return torch.tensor([])
 
 def write_label_to_txt(filename, label):
     '''
@@ -54,6 +66,7 @@ def write_label_to_txt(filename, label):
     :param label: label tensor, nx4 with [x, y, w, h]
     :return: None
     '''
+
     with open(filename, 'w') as f:
         for bbox in label:
             label_string = ""
@@ -70,13 +83,51 @@ def write_label_to_txt(filename, label):
 
 if __name__ == "__main__":
     import os
-    for xml_filename in os.listdir(
-            '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/val'):
-        f = os.path.join('/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/val',
-                         xml_filename)
-        if os.path.isfile(f):
-            if f.endswith('.xml'):
-                write_label_to_txt(f[:-3] + "txt", annotation_to_label(f))
+    import shutil
+
+    # # experiment copy file
+    # shutil.copyfile('/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/train/a.html',
+    #                 '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/train/b.html', follow_symlinks=True)
+
+
+    # extract one image from each training sequence
+    for i, filename in enumerate(os.listdir('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000')): # e.g. ILSVRC2015_VID_train_00000000
+        f = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000', filename)
+        if os.path.isdir(f):
+            end_part_image_0_name = filename + '-' + os.listdir(f)[0]  # e.g. ILSVRC2015_train_00000000-000000.JPEG
+            end_part_image_0 = os.path.join(filename, os.listdir(f)[0]) # e.g. ILSVRC2015_train_00000000/000000.JPEG
+            image_0 = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000', end_part_image_0)
+            # print(image_0)
+            image_0_annotation = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/train/ILSVRC2015_VID_train_0000', end_part_image_0)[:-4] + "xml"
+            # print(image_0_annotation)
+            image_0_dest = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/train/' + end_part_image_0_name
+            # print(image_0_dest)
+            shutil.copyfile(
+                image_0,
+                image_0_dest,
+                follow_symlinks=True)
+            image_0_text = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/train/' + end_part_image_0_name[:-4] + "txt"
+            # print(image_0_text)
+            write_label_to_txt(image_0_text, annotation_to_label(image_0_annotation))
+
+    # # train image path
+    # '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000/ILSVRC2015_train_00000000/000000.JPEG'
+    # # train annotation path
+    # '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/train/ILSVRC2015_VID_train_0000/ILSVRC2015_train_00000000/000000.xml'
+    # # new train image path
+    # '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/train'
+    # # train label path
+    # '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/train'
+    #
+    #
+    #
+    # # convert xml annotation to txt label
+    # for xml_filename in os.listdir('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000/ILSVRC2015_train_00139005/000000.JPEG'):
+    #     f = os.path.join('/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/val', xml_filename)
+    #     if os.path.isfile(f):
+    #         if f.endswith('.xml'):
+    #             write_label_to_txt(f[:-3] + "txt", annotation_to_label(f))
+
 
 
 
