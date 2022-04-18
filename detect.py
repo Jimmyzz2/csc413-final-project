@@ -237,7 +237,7 @@ def run(
         for frame_idx, seq in best_pred_bboxes_seq.items():  # key value pair
             pred_bboxes_seq[frame_idx] = []
             for bbox, score in seq:
-                pred_bboxes_seq[frame_idx].append((bbox[0], bbox[1], bbox[2], bbox[3], score))
+                pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), score.item()))
                 f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame
             f.write('\n')
 
@@ -253,10 +253,8 @@ def run(
         while True:  # while not at bottom of file
             # read line
             line = f.readline()  # represents one frame
-            # line = "val/ILSVRC2015_val_00000003/000083.JPEG 353,0,728,501,26 741,163,1045,552,26"
-            print(line)
-            # if line is empty (reaching end of file), break
-            if not line:
+            # e.g. line = "val/ILSVRC2015_val_00000003/000083.JPEG 353,0,728,501,26 741,163,1045,552,26"
+            if not line:  # if line is empty (reaching end of file), break
                 f.close()
                 break
             # split line into list
@@ -264,8 +262,8 @@ def run(
             img_path = line[0]
             gt_bboxes_seq[frame_idx] = []
             for bbox in line[1:]:  # each bbox in the frame
-                x1, y1, x2, y2, score = [int(x) for x in bbox.split(',')]
-                gt_bboxes_seq[frame_idx].append((x1, y1, x2, y2, score))
+                x1, y1, x2, y2, cls = [int(x) for x in bbox.split(',')]
+                gt_bboxes_seq[frame_idx].append((x1, y1, x2, y2, cls))
                 num_gt += 1
 
             frame_idx += 1
@@ -286,7 +284,8 @@ def run(
             for gt_bbox in gt_bboxes_seq[frame_idx]:
                 tensor_gt_bbox = torch.tensor(gt_bbox[:-1]).unsqueeze(0)
                 iou_pred_gt = box_iou(tensor_pred_bbox, tensor_gt_bbox).squeeze().item()
-                if iou_pred_gt > 0.8:  # TODO: try different thresholds
+                print("iou_pred_gt: ", iou_pred_gt)
+                if iou_pred_gt > 0.85:  # TODO: try different thresholds
                     num_tp += 1
                     break
             precision_lst.append(num_tp / num_pred)
@@ -295,12 +294,14 @@ def run(
     print("precision_lst: ", precision_lst)
     print("recall_lst: ", recall_lst)
 
-    # calculate the average precision (area under PR curve) for all sequences
     # plot pr curve
     plt.plot(recall_lst, precision_lst)
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.savefig('PR_curve.png')
+
+    # TODO: calculate the average precision (area under PR curve)
+
     
 
 
