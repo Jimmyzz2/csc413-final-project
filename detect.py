@@ -78,6 +78,8 @@ def run(
         hide_conf=False,  # hide confidences
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
+        seq_nms=False,  ## use sequence NMS instead of fast NMS
+        real_time=False  ## use modified seq-nms for real-time inference
 ):
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
@@ -119,6 +121,11 @@ def run(
     seq_scores = []  ## make into tensor of shape (num_frames, num_boxes)
     max_num_bboxes = 0
 
+    prev_bboxes = []  # T-2 and T-1 frames containing bboxes
+    apply_original_nms = True
+    if seq_nms:
+        apply_original_nms = False
+
     for path, im, im0s, vid_cap, s in dataset:
         t1 = time_sync()
         im = torch.from_numpy(im).to(device)
@@ -136,7 +143,47 @@ def run(
         dt[1] += t3 - t2
 
         # NMS
-        pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+        if real_time and len(prev_bboxes) >= 2:  # if we have T-2 and T-1 frames
+            apply_original_nms = False
+        
+        pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det, apply_original_nms=apply_original_nms)
+        
+        t_1 = time_sync()
+        # pred is a list of detections, on (n,6) tensor per image [xyxy, conf, cls]
+        if real_time and len(prev_bboxes) >= 2:  # using info from previous frame, select boxes that have the minimal difference to the previous frame
+            # apply modified nms on pred bboxes, using prev_bboxes
+            # 1. compute motion difference (displacement)
+            centroids = [xyxy2xywh(prev_bboxes[0][..., 0:4])[..., 0:2], xyxy2xywh(prev_bboxes[1][..., 0:4])[..., 0:2]]
+            # prev_bboxes[0] and prev_bboxes[1] frames may have different number of bboxes
+            print("centroids:", centroids.shape, centroids)
+            displacement_1 = centroids[1] - centroids[0]  # ? tensor of shape (num_boxes, 2)
+            print("displacement_1:", displacement_1.shape, displacement_1)
+            best_match = pred[0]
+            for bbox in pred:
+                this_centroid = xyxy2xywh(bbox[..., 0:4])[..., 0:2]
+                displacement_2 = this_centroid - centroids[1]
+                motion_diff = 
+
+
+            # 2. compute geometric difference
+
+            # 3. compute IoU
+
+            # 4. select bbox in curr frame that have the minimal difference to the previous frame bbox
+
+            # 5. if prev frame bbox's score is higher than curr frame bbox's score, then use prev score for curr frame bbox
+
+            # 6. suppression
+
+
+            if len(prev_bboxes) < 2:
+                prev_bboxes.append(pred)
+            else:
+                prev_bboxes[0], prev_bboxes[1] = prev_bboxes[1], pred
+        
+        t_2 = time_sync()
+        print(f'{t_2 - t_1:.3f}s for seq_nms')
+
         dt[2] += time_sync() - t3
 
         bboxes = pred[0][..., :4]
@@ -227,8 +274,14 @@ def run(
         for j in range(seq_bboxes[i].shape[0]): # each bbox in the frame
             padded_bboxes[i][j] = seq_bboxes[i][j]
 
-    best_pred_bboxes_seq = seq_nms(padded_bboxes, padded_scores)
-    # seq_nms() updates padded_bboxes and padded_scores
+    if seq_nms:
+        # run seq-nms
+        t_1 = time_sync()
+        best_pred_bboxes_seq = seq_nms(padded_bboxes, padded_scores)
+        t_2 = time_sync()
+        LOGGER.info(f'{t_2 - t_1:.3f}s for seq_nms')
+        print(f'{t_2 - t_1:.3f}s for seq_nms')
+        # seq_nms() updates padded_bboxes and padded_scores
 
     # turn into a dictionary of key as frame_idx, and value as list of tuples (x1,y1,x2,y2,score)
     pred_bboxes_seq = {}
@@ -342,6 +395,10 @@ def parse_opt():
     parser.add_argument('--hide-conf', default=False, action='store_true', help='hide confidences')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
+    
+    parser.add_argument('--seq_nms', action='store_true', help='apply seq-nms')
+    parser.add_argument('--real_time', action='store_true', help='apply real-time modified nms')
+
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))

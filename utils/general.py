@@ -738,13 +738,14 @@ def non_max_suppression(prediction,
                         agnostic=False,
                         multi_label=False,
                         labels=(),
-                        max_det=300):
+                        max_det=300,
+                        apply_original_nms=False
+                        ):
     """Non-Maximum Suppression (NMS) on inference results to reject overlapping bounding boxes
 
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
-    print("Calling the default non_max_suppression")
 
     bs = prediction.shape[0]  # batch size
     nc = prediction.shape[2] - 5  # number of classes  ## first 5 elements in this dimension2 might be xyxy & score
