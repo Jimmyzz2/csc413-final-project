@@ -81,6 +81,7 @@ def run(
 ):
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
+    save_img = False  ## debugging mode
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
     is_url = source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
     webcam = source.isnumeric() or source.endswith('.txt') or (is_url and not is_file)

@@ -158,27 +158,33 @@ def find_best_sequence(box_graph, scores):
 
 
 def rescore_sequence(sequence, scores, sequence_frame_index, max_sum, score_metric='avg'):
-    ''' Given a sequence, rescore the confidence scores according to the score_metric.
+    ''' Given a sequence, rescore the confidence scores according to the score_metric. Changes the scores tensor.
     Args
         sequence                    : The best sequence containing indices of boxes 
         scores                      : Tensor of shape (num_frames, num_boxes) containing the label for the corresponding box. 
         sequence_frame_index        : The index of the frame where the best sequence begins 
         best_score                  : The summed score of boxes in the sequence 
     Returns 
-        None   
+        scalar new score used in rescoring all the detections in the linkage
     '''
+    new_score = 0
     if score_metric == 'avg':
         avg_score=max_sum/len(sequence)
         for i,box_ind in enumerate(sequence):
             scores[sequence_frame_index+i][box_ind]= avg_score
+        new_score = avg_score
     elif score_metric == 'max':
         max_score = 0.0
         for i, box_ind in enumerate(sequence):
             if scores[sequence_frame_index + i][box_ind] > max_score: max_score = scores[sequence_frame_index+i][box_ind]
         for i, box_ind in enumerate(sequence):
             scores[sequence_frame_index + i][box_ind] = max_score
+        new_score = max_score
     else:
         raise ValueError("Invalid score metric")
+
+    return new_score.item()  
+
 
 def delete_sequence(sequence_to_delete, sequence_frame_index, scores, boxes, box_graph, suppress_threshold=0.3):
     ''' Given a sequence, remove its connections in box graph (create graph of linked boxes across frames).
@@ -221,82 +227,133 @@ def _seq_nms(box_graph, boxes, scores, nms_threshold, score_metric='avg'):
         scores                      : Tensor of shape (num_frames, num_boxes) containing the label for the corresponding box. 
         nms_threshold               : Threshold for the IoU value to determine when a box should be suppressed with regards to a best sequence.
     Returns 
-        None
+        best_seqs:  key is frame idx, value is a list of [bboxes_tensor, score_tensor] for each frame
     '''
-    best_seqs = {}  # value is a list of [bboxes_tensor, score_tensor] lists for each frame, key with frame_idx
-    ## best_seqs = {frame_id1: [[bbox, adjusted_scores], ...], frame_id2: [...], ...} 
-    
+
+    linkages = []
     while True: 
         sequence_frame_index, best_sequence, best_score = find_best_sequence(box_graph, scores)
-        print("sequence_frame_index:", sequence_frame_index, " best_score:", best_score, " best_sequence:", best_sequence)
+        print("sequence_frame_index:", sequence_frame_index," best_sequence:", best_sequence, " best_score:", best_score)
 
         if len(best_sequence) <= 1:
             break
-        rescore_sequence(best_sequence, scores, sequence_frame_index, best_score, score_metric='max')
+        new_score = rescore_sequence(best_sequence, scores, sequence_frame_index, best_score, score_metric='max')  ## changes the scores tensor
         delete_sequence(best_sequence, sequence_frame_index, scores, boxes, box_graph, suppress_threshold=nms_threshold)
-        
-        ## save best sequence bboxes and adjusted_scores
-        for i, box_idx in enumerate(best_sequence):
+        linkages.append([sequence_frame_index, best_sequence, new_score])
+
+    linkages.sort()  # sort the linkages by their start frame idx
+    print("\n original linkages:", linkages)  # [[0, [7,9,3,3,1], 3.2497], [...] ]
+
+    # occlusion handling
+    linkages_to_remove = []  # linkages appended to another linkage in the result_linkages
+    result_linkages = []
+    for linkage1 in linkages[:-1]:
+        print("original linkage1", linkage1)
+        # extend linkage1 if there is a linkage2 for the same object
+        for linkage2 in linkages:
+            if linkage1 == linkage2 or linkage2 in result_linkages or linkage2 in linkages_to_remove:  
+                continue  # skip all actors started at the same frame or previous frame, or to be removed (i.e. matched)
+
+            # get relevant bboxes and scores from the linkages
+            linkage1_tail_frame_idx = linkage1[0] + len(linkage1[1]) - 1
+            linkage1_tail_frame_bbox_idx = linkage1[1][-1]
+            linkage1_tail_frame_bbox = boxes[linkage1_tail_frame_idx][linkage1_tail_frame_bbox_idx]
+            linkage1_score = linkage1[-1]
+
+            linkage2_head_frame_idx = linkage2[0]
+            linkage2_head_frame_bbox_idx = linkage2[1][0]
+            linkage2_head_frame_bbox = boxes[linkage2_head_frame_idx][linkage2_head_frame_bbox_idx]
+            linkage2_score = linkage2[-1]
+
+            # check if linkage1 is potentially the same object as linkage2
+            if linkage2_head_frame_idx > linkage1_tail_frame_idx:  # linkage 2 head frame is after linkage one tail frame
+                iou = box_iou(torch.unsqueeze(linkage1_tail_frame_bbox, dim=0), torch.unsqueeze(linkage2_head_frame_bbox, dim=0)).squeeze()
+                print("iou", iou)
+                if iou > 0.1:  #TODO: try other thresholds
+                    # update linkage1: connect the linkages with middle non-detection frames estimated
+                    # TODO: motion assumption
+                    # TODO: no middle frame estimations
+                    num_middle_frames = linkage2_head_frame_idx - linkage1_tail_frame_idx - 1
+                    middle_frame_bbox = torch.mean(torch.stack([linkage1_tail_frame_bbox, linkage2_head_frame_bbox]), dim=0)
+                    print("linkage1", linkage1)
+                    linkage1[1].extend([middle_frame_bbox]*num_middle_frames)
+                    linkage1[1].extend(linkage2[1])
+                    linkage1[-1] = max(linkage1_score, linkage2_score)
+                    print("extended linkage1", linkage1)
+                    linkages_to_remove.append(linkage2)
+        print("perhaps extended linkage1", linkage1)
+        result_linkages.append(linkage1)
+
+    print("after occlusion handling:", result_linkages, "\n")
+
+
+    # ## occlusion handling: if iou of the last frame and first frame in consecutive best sequences is greater than 0.5, connect the sequences into one
+    # lst_frame_idx = list(best_seqs.keys())
+    # new_best_seqs_frames = {}
+    # for frame_idx in best_seqs:
+    #     if frame_idx == lst_frame_idx[-1]:  # last frame in best_seqs, no next frame to connect to
+    #         break
+    #     next_frame_idx = lst_frame_idx[lst_frame_idx.index(frame_idx) + 1]
+    #     print("frame_idx:", frame_idx, " next_frame_idx:", next_frame_idx)
+    #     if len(best_seqs[frame_idx]) > 0 and len(best_seqs[next_frame_idx]) > 0:
+    #         ## TODO: last_frame_bbox should be the last frame in the linkage i.e. identify gap in linkages!! not going by consecutive frames
+    #         last_frame_bbox = best_seqs[frame_idx][-1][0]  # tensor of shape (1, 4) containing xyxy
+    #         first_frame_bbox = best_seqs[next_frame_idx][0][0]  # tensor of shape (1, 4) containing xyxy
+    #         print("last_frame_bbox:", last_frame_bbox, " first_frame_bbox:", first_frame_bbox)
+    #         best_seqs_iou = box_iou(torch.unsqueeze(last_frame_bbox, dim=0), torch.unsqueeze(first_frame_bbox, dim=0)).squeeze()
+    #         # TODO: or iou between any bbox in best_seqs[frame_idx] and best_seqs[next_frame_idx] exceeding threshold
+    #         # TODO: maybe there is a middle frame with detection, connect it to the 2 linkages / polish up middle frames estimations
+    #         if best_seqs_iou > 0.5:  #TODO: try other thresholds
+    #             # find new max score
+    #             bbox1_max_score = max([bbox[1] for bbox in best_seqs[frame_idx]])
+    #             bbox2_max_score = max([bbox[1] for bbox in best_seqs[next_frame_idx]])
+    #             print("previous max scores:", bbox1_max_score, bbox2_max_score)
+    #             max_score = max(bbox1_max_score, bbox2_max_score)  # the max score of the two linkages in best_seqs
+    #             # rescore all bboxes in best_seqs[frame_idx] and best_seqs[next_frame_idx]
+    #             for bbox in best_seqs[frame_idx]:
+    #                 bbox[1] = max_score
+    #             for bbox in best_seqs[next_frame_idx]:
+    #                 bbox[1] = max_score
+                
+    #             fill_middle_frames = True  # TODO: evaluate when fill_middle_frames=False
+    #             if fill_middle_frames: # fill in middle frames that had no bbox detection
+    #                 for i in range(frame_idx+1, next_frame_idx):
+    #                     middle_frame_bbox = [torch.mean(torch.stack([last_frame_bbox, first_frame_bbox]), dim=0), max_score]
+    #                     if i in best_seqs:
+    #                         # middle bbox location is average of the two bboxes
+    #                         best_seqs[i].append(middle_frame_bbox)
+    #                     else:
+    #                         new_best_seqs_frames[i] = [middle_frame_bbox]
+    #                     print("added to middle frame:", i)
+    #                     print("middle_frame_bbox", middle_frame_bbox)
+
+    #             print("new max score:", best_seqs[frame_idx][0][1])
+                
+    #     else:
+    #         print("Unexpected behavior in seq_nms during occlusion handling")
+
+    # best_seqs.update(new_best_seqs_frames)
+    # best_seqs = OrderedDict(sorted(best_seqs.items()))
+
+
+    ## save best sequence bboxes and adjusted_scores into dictionary format
+    best_seqs = {}  # value is a list of [bboxes_tensor, score_tensor] lists for each frame, key with frame_idx
+    ## best_seqs = {frame_id1: [[bbox, adjusted_scores], ...], frame_id2: [...], ...} 
+    for linkage in result_linkages:
+        sequence_frame_index, bboxes, score = linkage  # same score for all bboxes in the linkage
+        num_middle_bboxes = 0
+        for i in range(len(bboxes)):
             frame_id = sequence_frame_index + i
-            if sequence_frame_index + i not in best_seqs: 
+            if frame_id not in best_seqs: 
                 best_seqs[frame_id] = []
-            best_seqs[frame_id].append([boxes[frame_id][box_idx], scores[frame_id][box_idx]])
+            
+            if type(bboxes[i]) is int:  # bboxes[i] refers to original frame idx
+                box_idx = bboxes[i]
+                original_frame_id = frame_id
+                best_seqs[frame_id].append([boxes[original_frame_id][box_idx], torch.tensor(score)])
+            else:  # this bboxes[i] refers to an added middle bbox tensor
+                middle_bbox = bboxes[i]
+                best_seqs[frame_id].append([middle_bbox, torch.tensor(score)])
+                num_middle_bboxes += 1
     
-    print("before occlusion handling:", best_seqs)
-
-    ## occlusion handling: if iou of the last frame and first frame in consecutive best sequences is greater than 0.5, connect the sequences into one
-    lst_frame_idx = list(best_seqs.keys())
-    new_best_seqs_frames = {}
-    for frame_idx in best_seqs:
-        if frame_idx == lst_frame_idx[-1]:  # last frame in best_seqs, no next frame to connect to
-            break
-        next_frame_idx = lst_frame_idx[lst_frame_idx.index(frame_idx) + 1]
-        print("frame_idx:", frame_idx, " next_frame_idx:", next_frame_idx)
-        if len(best_seqs[frame_idx]) > 0 and len(best_seqs[next_frame_idx]) > 0:
-            ## TODO: last_frame_bbox should be the last frame in the linkage i.e. identify gap in linkages!! not going by consecutive frames
-            last_frame_bbox = best_seqs[frame_idx][-1][0]  # tensor of shape (1, 4) containing xyxy
-            first_frame_bbox = best_seqs[next_frame_idx][0][0]  # tensor of shape (1, 4) containing xyxy
-            print("last_frame_bbox:", last_frame_bbox, " first_frame_bbox:", first_frame_bbox)
-            best_seqs_iou = box_iou(torch.unsqueeze(last_frame_bbox, dim=0), torch.unsqueeze(first_frame_bbox, dim=0)).squeeze()
-            # TODO: or iou between any bbox in best_seqs[frame_idx] and best_seqs[next_frame_idx] exceeding threshold
-            # TODO: maybe there is a middle frame with detection, connect it to the 2 linkages / polish up middle frames estimations
-            if best_seqs_iou > 0.5:  #TODO: try other thresholds
-                # find new max score
-                bbox1_max_score = max([bbox[1] for bbox in best_seqs[frame_idx]])
-                bbox2_max_score = max([bbox[1] for bbox in best_seqs[next_frame_idx]])
-                print("previous max scores:", bbox1_max_score, bbox2_max_score)
-                max_score = max(bbox1_max_score, bbox2_max_score)  # the max score of the two linkages in best_seqs
-                # rescore all bboxes in best_seqs[frame_idx] and best_seqs[next_frame_idx]
-                for bbox in best_seqs[frame_idx]:
-                    bbox[1] = max_score
-                for bbox in best_seqs[next_frame_idx]:
-                    bbox[1] = max_score
-                
-                fill_middle_frames = True  # TODO: evaluate when fill_middle_frames=False
-                if fill_middle_frames: # fill in middle frames that had no bbox detection
-                    for i in range(frame_idx+1, next_frame_idx):
-                        middle_frame_bbox = [torch.mean(torch.stack([last_frame_bbox, first_frame_bbox]), dim=0), max_score]
-                        if i in best_seqs:
-                            # middle bbox location is average of the two bboxes
-                            best_seqs[i].append(middle_frame_bbox)
-                        else:
-                            new_best_seqs_frames[i] = [middle_frame_bbox]
-                        print("added to middle frame:", i)
-                        print("middle_frame_bbox", middle_frame_bbox)
-
-                print("new max score:", best_seqs[frame_idx][0][1])
-                
-        else:
-            print("Unexpected behavior in seq_nms during occlusion handling")
-
-    best_seqs.update(new_best_seqs_frames)
-    best_seqs = OrderedDict(sorted(best_seqs.items()))
-    print("after occlusion handling:", best_seqs)
     return best_seqs
-
-
-#if __name__ == "__main__":
-    #boxes = np.load('/path/to/boxes')
-    #scores = np.load('/path/to/scores')
-    #labels = np.ones(scores.shape)
-    #seq_nms(boxes, scores, labels)
