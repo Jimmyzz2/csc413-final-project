@@ -273,10 +273,12 @@ def _seq_nms(box_graph, boxes, scores, nms_threshold, score_metric='avg'):
                     # update linkage1: connect the linkages with middle non-detection frames estimated
                     # TODO: motion assumption
                     # TODO: no middle frame estimations
-                    num_middle_frames = linkage2_head_frame_idx - linkage1_tail_frame_idx - 1
-                    middle_frame_bbox = torch.mean(torch.stack([linkage1_tail_frame_bbox, linkage2_head_frame_bbox]), dim=0)
-                    print("linkage1", linkage1)
-                    linkage1[1].extend([middle_frame_bbox]*num_middle_frames)
+                        # num_middle_frames = linkage2_head_frame_idx - linkage1_tail_frame_idx - 1
+                        # middle_frame_bbox = torch.mean(torch.stack([linkage1_tail_frame_bbox, linkage2_head_frame_bbox]), dim=0)
+                        # print("linkage1", linkage1)
+                        # linkage1[1].extend([middle_frame_bbox]*num_middle_frames)
+                    
+
                     linkage1[1].extend(linkage2[1])
                     linkage1[-1] = max(linkage1_score, linkage2_score)
                     print("extended linkage1", linkage1)
