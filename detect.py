@@ -56,7 +56,8 @@ import glob
 @torch.no_grad()
 def run(
         weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
-        source=ROOT / 'data/images',  # file/dir/URL/glob, 0 for webcam
+        # source=ROOT / 'data/images',  # file/dir/URL/glob, 0 for webcam
+        test_seqs=ROOT / 'test_sequences',  # dir for the test set containing images and ground truth labels
         data=ROOT / 'data/coco128.yaml',  # dataset.yaml path
         imgsz=(640, 640),  # inference size (height, width)
         conf_thres=0.25,  # confidence threshold
@@ -88,7 +89,7 @@ def run(
     if use_seq_nms or use_modified_seq_nms:
         apply_original_nms = False
 
-    source = str(source)
+    source = str(test_seqs)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     save_img = False  ## debugging mode
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
@@ -106,10 +107,9 @@ def run(
     model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
 
     # source dir contains img dirs, each img dir has frames from 1 video
-    seq_i = -1
-    for img_folder in glob.glob(source + '/*'):  # run inference on each sequence
+    seq_i = 0
+    for img_folder in glob.glob(source + '/images/*'):  # run inference on each sequence
         dest_dir_name = img_folder.split('/')[-1]
-        seq_i += 1
         # Directories
         save_dir = Path(project) / (str(seq_i) + "_" + dest_dir_name)
         print(save_dir)
@@ -277,7 +277,8 @@ def run(
 
         gt_bboxes_seq = {}
         num_gt = 0
-        with open("turtle20_gt.txt", "r") as f:  # TODO: change to command line arg or etc.
+        gt_filepath = glob.glob(test_seqs + "/labels/*")[seq_i]
+        with open(gt_filepath, "r") as f:  # TODO: change to command line arg or etc.
             frame_idx = 0
             while True:  # while not at bottom of file
                 # read line
@@ -367,6 +368,8 @@ def run(
             LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
         if update:
             strip_optimizer(weights)  # update model (to fix SourceChangeWarning)
+        
+        seq_i += 1
 
 
 def parse_opt():
@@ -399,6 +402,7 @@ def parse_opt():
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     parser.add_argument('--use_seq_nms', action='store_true', help='apply seq-nms')
     parser.add_argument('--use_modified_seq_nms', action='store_true', help='apply modified seq-nms')
+    parser.add_argument('--test_seqs', type=str, default=ROOT / 'test_sequences', help='dir for the test set containing images and ground truth labels')
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))
