@@ -250,10 +250,16 @@ def run(
             t_2 = time_sync()
             print(f'{t_2 - t_1:.3f}s for seq_nms')
 
+            seq_nms_dir_name = "dir"
+            if use_seq_nms:
+                seq_nms_dir_name = "seq_nms"
+            elif use_modified_seq_nms:
+                seq_nms_dir_name = "modified_seq_nms"
+
             # turn into a dictionary of key as frame_idx, and value as list of tuples (x1,y1,x2,y2,score)
             pred_bboxes_seq = {}
             ## and save best_seqs into file
-            with open(str(save_dir / 'seq_nms_results.txt'), 'a') as f:
+            with open(str(save_dir) + seq_nms_dir_name + '_results.txt', 'a') as f:
                 for frame_idx, seq in best_pred_bboxes_seq.items():  # key value pair
                     pred_bboxes_seq[frame_idx] = []
                     for bbox, score in seq:
@@ -262,11 +268,7 @@ def run(
                         f.write('\n')
             
             ## save visualizations for (modified) seq-nms processed images
-            seq_nms_dir_name = "dir"
-            if use_seq_nms:
-                seq_nms_dir_name = "seq_nms"
-            elif use_modified_seq_nms:
-                seq_nms_dir_name = "modified_seq_nms"
+
             (save_dir / seq_nms_dir_name).mkdir(parents=True, exist_ok=True)  # make viz folder
             
             for f_idx, img_x in enumerate(dataset):
@@ -320,8 +322,8 @@ def run(
                     gt_bboxes_seq[f_i].append((float(line[1]),float(line[2]),float(line[3]),float(line[4]), f_cls))
                     num_gt += 1
         
-        print("pred_bboxes_seq: ", pred_bboxes_seq)
-        print("gt_bboxes_seq: ", gt_bboxes_seq)
+        # print("pred_bboxes_seq: ", pred_bboxes_seq)
+        # print("gt_bboxes_seq: ", gt_bboxes_seq)
 
         ## evaluate performance
 
@@ -339,7 +341,7 @@ def run(
                 for gt_bbox in gt_bboxes_seq[frame_idx]:
                     tensor_gt_bbox = torch.tensor(gt_bbox[:-1]).unsqueeze(0)
                     iou_pred_gt = box_iou(tensor_pred_bbox, tensor_gt_bbox).squeeze().item()
-                    print("iou_pred_gt: ", iou_pred_gt)
+                    # print("iou_pred_gt: ", iou_pred_gt)
                     if iou_pred_gt > 0.85 and (gt_bbox not in gt_bboxes_used):  # TODO: try different thresholds
                         # num_tp += 1
                         gt_bboxes_used.append(gt_bbox)
@@ -372,7 +374,7 @@ def run(
         plt.plot(recall_lst, precision_lst)
         plt.xlabel('Recall')
         plt.ylabel('Precision')
-        plt.savefig(str(save_dir / 'PR_curve.png'))
+        plt.savefig(str(save_dir / 'PR_curve.png'))  ## specify to dest_folder
 
         # calculate the average precision (area under PR curve)
         if len(is_tp_lst) == 0:
