@@ -260,6 +260,24 @@ def run(
                         pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), score.item()))
                         f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame
                         f.write('\n')
+            
+            ## save visualizations for (modified) seq-nms processed images
+            seq_nms_dir_name = "dir"
+            if use_seq_nms:
+                seq_nms_dir_name = "seq_nms"
+            elif use_modified_seq_nms:
+                seq_nms_dir_name = "modified_seq_nms"
+            (save_dir / seq_nms_dir_name).mkdir(parents=True, exist_ok=True)  # make viz folder
+            
+            for f_idx, img_x in enumerate(dataset):
+                path, im, im0s, vid_cap, s = img_x
+                annotator = Annotator(im0s, line_width=line_thickness, example=str(names))
+                for v_bbox in pred_bboxes_seq[f_idx]:
+                    annotator.box_label(v_bbox[:4], label=str(v_bbox[4]), color=colors(c, True))
+                img_path_output = str(save_dir / seq_nms_dir_name) + "/_" + str(f_idx) + ".JPEG"
+                print(img_path_output)
+                cv2.imwrite(img_path_output, annotator.result())
+
         else:
             # seq_bboxes = [tensor([[420.,   5., 613., 187.], 
             #                       [...]]), 
