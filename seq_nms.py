@@ -282,6 +282,8 @@ def _seq_nms(box_graph, boxes, scores, nms_threshold, use_modified_seq_nms):
                                             potential_scores.append(scores[frame_i][b_i])
                                     print("potential_scores", potential_scores)
                                     print("potential_bboxes", potential_bboxes)
+                                    if len(potential_bboxes) == 0:
+                                        continue
                                     print(sort_together([potential_scores, potential_bboxes])[1])
                                     isolated_bbox = sort_together([potential_scores, potential_bboxes])[1][-1]
                                     updated_est_bbox = torch.mean(torch.stack([detected_bbox_1, isolated_bbox]), dim=0)
