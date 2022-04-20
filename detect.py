@@ -41,7 +41,7 @@ ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 from models.common import DetectMultiBackend
 from utils.datasets import IMG_FORMATS, VID_FORMATS, LoadImages, LoadStreams
 from utils.general import (LOGGER, check_file, check_img_size, check_imshow, check_requirements, colorstr, cv2,
-                           increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh)
+                           increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xywhn2xyxy, xyxy2xywh)
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, time_sync
 
@@ -51,6 +51,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import average_precision_score
 from more_itertools import sort_together
 import glob
+import numpy as np
 
 
 @torch.no_grad()
@@ -91,7 +92,7 @@ def run(
 
     source = str(test_seqs)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
-    save_img = False  ## debugging mode
+    # save_img = False  ## debugging mode
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
     is_url = source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://'))
     webcam = source.isnumeric() or source.endswith('.txt') or (is_url and not is_file)
@@ -109,7 +110,7 @@ def run(
     # source dir contains img dirs, each img dir has frames from 1 video
     seq_i = 0
     ap_sum = 0
-    for img_folder in glob.glob(source + '/images/*'):  # run inference on each sequence
+    for img_folder in sorted(glob.glob(source + '/images/*')):  # run inference on each sequence
         dest_dir_name = img_folder.split('/')[-1]
         # Directories
         save_dir = Path(project) / (str(seq_i) + "_" + dest_dir_name)
@@ -258,7 +259,7 @@ def run(
                     for bbox, score in seq:
                         pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), score.item()))
                         f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame
-                    f.write('\n')
+                        f.write('\n')
         else:
             # seq_bboxes = [tensor([[420.,   5., 613., 187.], 
             #                       [...]]), 
@@ -266,11 +267,12 @@ def run(
             # seq_scores = [tensor([0.38223]), tensor([0.47908]), ...]
             pred_bboxes_seq = {}
             with open(str(save_dir / 'nms_results.txt'), 'a') as f:
-                for frame_idx, frame in enumerate(pred_bboxes_seq):
+                for frame_idx, frame in enumerate(seq_bboxes):
                     pred_bboxes_seq[frame_idx] = []
-                    for i, bbox in enumerate(seq_bboxes):
-                        pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), seq_scores[i].item()))
-                        f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame  
+                    for i, bbox in enumerate(seq_bboxes[frame_idx]):
+                        b_score = seq_scores[i].item()
+                        pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), b_score))
+                        f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {b_score} ')  ## check for multi-bbox frame  
 
         # pred_bboxes_seq =
         # {0: [(420.0, 5.0, 613.0, 187.0, 0.5108696222305298), (...)], 
@@ -278,37 +280,35 @@ def run(
 
         gt_bboxes_seq = {}
         num_gt = 0
-        gt_filepath = glob.glob(test_seqs + "/labels/*")[seq_i]
-        with open(gt_filepath, "r") as f:
-            frame_idx = 0
-            while True:  # while not at bottom of file
-                # read line
-                line = f.readline()  # represents one frame
-                # e.g. line = "val/ILSVRC2015_val_00000003/000083.JPEG 353,0,728,501,26 741,163,1045,552,26"
-                if not line:  # if line is empty (reaching end of file), break
-                    f.close()
-                    break
-                # split line into list
-                line = line.split(' ')
-                img_path = line[0]
-                gt_bboxes_seq[frame_idx] = []
-                for bbox in line[1:]:  # each bbox in the frame
-                    x1, y1, x2, y2, cls = [int(x) for x in bbox.split(',')]
-                    gt_bboxes_seq[frame_idx].append((x1, y1, x2, y2, cls))
+        gt_dir = sorted(glob.glob(test_seqs + "/labels/*"))[seq_i]
+        for f_i, gt_file in enumerate(sorted(glob.glob(gt_dir + "/*.txt"))):
+            # print("gt labels filepath:", gt_file)
+            gt_bboxes_seq[f_i] = []
+            with open(gt_file, "r") as f:
+                while True:  # while not at bottom of file
+                    # read line
+                    line = f.readline()  # represents one frame
+                    # e.g. line = "1 0.530078113079071 0.4000000059604645 0.08359374850988388 0.06666667014360428 "
+                    if not line:  # if line is empty (reaching end of file), break
+                        f.close()
+                        break
+                    # split line into list
+                    line = line.split(' ')
+                    f_cls = int(line[0])
+                    # bbox_tensor_xywh = torch.tensor([[float(line[1]),float(line[2]),float(line[3]),float(line[4])]])
+                    # f_bbox = xywhn2xyxy(bbox_tensor_xywh).squeeze()
+                    # gt_bboxes_seq[f_i].append((f_bbox[0].item(), f_bbox[1].item(), f_bbox[2].item(), f_bbox[3].item(), f_cls))
+                    gt_bboxes_seq[f_i].append((float(line[1]),float(line[2]),float(line[3]),float(line[4]), f_cls))
                     num_gt += 1
-                frame_idx += 1
+        
         print("pred_bboxes_seq: ", pred_bboxes_seq)
         print("gt_bboxes_seq: ", gt_bboxes_seq)
 
         ## evaluate performance
 
         # get the true positives and corresponding pred conf scores
-        # num_tp = 0
-        # num_pred = 0
         is_tp_lst = []
         scores = []
-        # precision_lst = []
-        # recall_lst = []
         for frame_idx in pred_bboxes_seq:
             # if IoU of predicted bbox and gt bbox is greater than threshold, then it is a true positive
             pred_bboxes_frame = pred_bboxes_seq[frame_idx]
@@ -331,14 +331,12 @@ def run(
                 else:
                     is_tp_lst.append(0)
                 scores.append(pred_bbox[-1])
-                # precision_lst.append(num_tp / num_pred)
-                # recall_lst.append(num_tp / num_gt)
         
         # calculate precision & recall
         if len(scores) > 0:
             scores, is_tp_lst = sort_together([scores, is_tp_lst])
-        print("scores", scores)
-        print("is_tp_lst", is_tp_lst)
+        # print("scores", scores)
+        # print("is_tp_lst", is_tp_lst)
 
         precision_lst = []
         recall_lst = []
@@ -357,10 +355,12 @@ def run(
         plt.ylabel('Precision')
         plt.savefig(str(save_dir / 'PR_curve.png'))
 
-        # TODO: calculate the average precision (area under PR curve)
+        # calculate the average precision (area under PR curve)
         ap = average_precision_score(is_tp_lst, scores)
-        print("AP of this sequence:",seq_i, ap)
-        ap_sum += ap
+        print("AP of this sequence", dest_dir_name ,":", ap)
+        if not np.isnan(ap):
+            ap_sum += ap
+        # print("partial ap_sum:", ap_sum)
 
         # Print results
         t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
