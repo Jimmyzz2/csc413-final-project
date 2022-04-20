@@ -1,8 +1,11 @@
 import numpy as np
 import copy
+from sklearn.ensemble import IsolationForest
 
 from torchvision.ops import box_iou
 import torch
+from more_itertools import sort_together
+
 
 def seq_nms(boxes, scores, labels=None, linkage_threshold=0.5, nms_threshold=0.3, score_metric='max', use_modified_seq_nms=False):
     ''' Filter detections using the seq-nms algorithm. Boxes and classifications should be organized sequentially along the first dimension 
@@ -194,6 +197,7 @@ def _seq_nms(box_graph, boxes, scores, nms_threshold, use_modified_seq_nms):
     Returns 
         best_seqs:  key is frame idx, value is a list of [bboxes_tensor, score_tensor] for each frame
     '''
+    print("seq_nms iou_threshold:", nms_threshold)
     best_seqs = {}
     linkages = []
     while True: 
@@ -221,41 +225,83 @@ def _seq_nms(box_graph, boxes, scores, nms_threshold, use_modified_seq_nms):
     if use_modified_seq_nms:
         linkages_to_remove = []  # linkages appended to another linkage in the result_linkages
         result_linkages = []
-        for linkage1 in linkages[:-1]:
+        for linkage1 in linkages:
             # extend linkage1 if there is a linkage2 for the same object
-            for linkage2 in linkages:
-                if linkage1 == linkage2 or linkage2 in result_linkages or linkage2 in linkages_to_remove:  
-                    continue  # skip all actors started at the same frame or previous frame, or to be removed (i.e. matched)
+            if linkage1 not in linkages_to_remove:
+                for linkage2 in linkages:
+                    if linkage1 == linkage2 or linkage2 in result_linkages or linkage2 in linkages_to_remove:  
+                        continue  # skip all actors started at the same frame or previous frame, or to be removed (i.e. matched)
 
-                # get relevant bboxes and scores from the linkages
-                linkage1_tail_frame_idx = linkage1[0] + len(linkage1[1]) - 1
-                linkage1_tail_frame_bbox_idx = linkage1[1][-1]
-                linkage1_tail_frame_bbox = boxes[linkage1_tail_frame_idx][linkage1_tail_frame_bbox_idx]
-                linkage1_score = linkage1[-1]
+                    # get relevant bboxes and scores from the linkages
+                    linkage1_tail_frame_idx = linkage1[0] + len(linkage1[1]) - 1
+                    linkage1_tail_frame_bbox_idx = linkage1[1][-1]
+                    linkage1_tail_frame_bbox = boxes[linkage1_tail_frame_idx][linkage1_tail_frame_bbox_idx]
+                    linkage1_score = linkage1[-1]
 
-                linkage2_head_frame_idx = linkage2[0]
-                linkage2_head_frame_bbox_idx = linkage2[1][0]
-                linkage2_head_frame_bbox = boxes[linkage2_head_frame_idx][linkage2_head_frame_bbox_idx]
-                linkage2_score = linkage2[-1]
+                    linkage2_head_frame_idx = linkage2[0]
+                    linkage2_head_frame_bbox_idx = linkage2[1][0]
+                    linkage2_head_frame_bbox = boxes[linkage2_head_frame_idx][linkage2_head_frame_bbox_idx]
+                    linkage2_score = linkage2[-1]
 
-                # check if linkage1 is potentially the same object as linkage2
-                if linkage2_head_frame_idx > linkage1_tail_frame_idx:  # linkage 2 head frame is after linkage one tail frame
-                    iou = box_iou(torch.unsqueeze(linkage1_tail_frame_bbox, dim=0), torch.unsqueeze(linkage2_head_frame_bbox, dim=0)).squeeze()
-                    print("iou", iou)
-                    if iou > 0.1:  #TODO: try other thresholds
-                        # update linkage1: connect the linkages with middle non-detection frames estimated
-                        # TODO: motion assumption
-                        # TODO: no middle frame estimations
-                            # num_middle_frames = linkage2_head_frame_idx - linkage1_tail_frame_idx - 1
-                            # middle_frame_bbox = torch.mean(torch.stack([linkage1_tail_frame_bbox, linkage2_head_frame_bbox]), dim=0)
-                            # print("linkage1", linkage1)
-                            # linkage1[1].extend([middle_frame_bbox]*num_middle_frames)
-                        
+                    # check if linkage1 is potentially the same object as linkage2
+                    if linkage2_head_frame_idx > linkage1_tail_frame_idx:  # linkage 2 head frame is after linkage one tail frame
+                        iou = box_iou(torch.unsqueeze(linkage1_tail_frame_bbox, dim=0), torch.unsqueeze(linkage2_head_frame_bbox, dim=0)).squeeze()
+                        print("iou", iou)
+                        if iou > nms_threshold:  #TODO: try other thresholds
+                            # update linkage1: connect the linkages with middle non-detection frames estimated
 
-                        linkage1[1].extend(linkage2[1])
-                        linkage1[-1] = max(linkage1_score, linkage2_score)
-                        linkages_to_remove.append(linkage2)
-            result_linkages.append(linkage1)
+                            # TODO: motion assumption
+                            # TODO: no middle frame estimations
+                                # num_middle_frames = linkage2_head_frame_idx - linkage1_tail_frame_idx - 1
+                                # middle_frame_bbox = torch.mean(torch.stack([linkage1_tail_frame_bbox, linkage2_head_frame_bbox]), dim=0)
+                                # print("linkage1", linkage1)
+                                # linkage1[1].extend([middle_frame_bbox]*num_middle_frames)
+                            
+                            # find any middle frames with detections that overlaps with our bbox estimation
+                            middle_linkage = []
+                            detected_bbox_1 = linkage1_tail_frame_bbox  # bbox from last frame that contains detection
+                            detected_bbox_2 = linkage2_head_frame_bbox  # bbox from next frame that contains detection
+                            estimated_bbox = torch.mean(torch.stack([detected_bbox_1, detected_bbox_2]), dim=0)
+                            isolated_frame_idx = linkage1_tail_frame_idx
+                            for frame_i in range(linkage1_tail_frame_idx + 1, linkage2_head_frame_idx):
+                                print(estimated_bbox)
+                                if torch.sum(boxes[frame_i]) == 0:  # no detection in this middle frame, go to next frame
+                                    continue
+                                else:
+                                    # find best matching bbox in this frame and add this to middle_linkage
+                                    isolated_bboxes = boxes[frame_i]  # potentially contains multiple bboxes in this frame
+                                    iou_mat = box_iou(torch.unsqueeze(estimated_bbox, 0), isolated_bboxes).squeeze()
+                                    print("isolated_bboxes", isolated_bboxes)
+                                    print("iou_mat", iou_mat)
+                                    potential_bboxes = []
+                                    potential_scores = []
+                                    for b_i, iou_middle in enumerate(iou_mat):
+                                        print("iou_middle", iou_middle)
+                                        if iou_middle > nms_threshold:
+                                            potential_bboxes.append(isolated_bboxes[b_i])
+                                            potential_scores.append(scores[frame_i][b_i])
+                                    print("potential_scores", potential_scores)
+                                    print("potential_bboxes", potential_bboxes)
+                                    print(sort_together([potential_scores, potential_bboxes])[1])
+                                    isolated_bbox = sort_together([potential_scores, potential_bboxes])[1][-1]
+                                    updated_est_bbox = torch.mean(torch.stack([detected_bbox_1, isolated_bbox]), dim=0)
+                                    num_middle = frame_i - isolated_frame_idx - 1
+                                    middle_linkage.extend([updated_est_bbox] * num_middle + [isolated_bbox])
+                                    
+                                    detected_bbox_1 = isolated_bbox
+                                    isolated_frame_idx = frame_i
+                                    estimated_bbox = torch.mean(torch.stack([detected_bbox_1, detected_bbox_2]), dim=0)
+                            
+                            num_middle_frames = linkage2_head_frame_idx - isolated_frame_idx - 1
+                            middle_linkage.extend([estimated_bbox]*num_middle_frames)
+                            print(middle_linkage)
+                            linkage1[1].extend(middle_linkage)
+
+                            linkage1[1].extend(linkage2[1])
+                            linkage1[-1] = max(linkage1_score, linkage2_score)
+                            linkages_to_remove.append(linkage2)
+                
+                result_linkages.append(linkage1)
 
         print("after occlusion handling:", result_linkages, "\n")
 

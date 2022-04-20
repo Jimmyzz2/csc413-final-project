@@ -333,7 +333,8 @@ def run(
                 # recall_lst.append(num_tp / num_gt)
         
         # calculate precision & recall
-        scores, is_tp_lst = sort_together([scores, is_tp_lst])
+        if len(scores) > 0:
+            scores, is_tp_lst = sort_together([scores, is_tp_lst])
         print("scores", scores)
         print("is_tp_lst", is_tp_lst)
 
@@ -352,7 +353,7 @@ def run(
         plt.plot(recall_lst, precision_lst)
         plt.xlabel('Recall')
         plt.ylabel('Precision')
-        plt.savefig('PR_curve.png')
+        plt.savefig(str(save_dir / 'PR_curve.png'))
 
         # TODO: calculate the average precision (area under PR curve)
         ap = average_precision_score(is_tp_lst, scores)
