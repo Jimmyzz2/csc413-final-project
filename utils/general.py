@@ -738,14 +738,13 @@ def non_max_suppression(prediction,
                         agnostic=False,
                         multi_label=False,
                         labels=(),
-                        max_det=300):
+                        max_det=300,
+                        apply_original_nms=False):
     """Non-Maximum Suppression (NMS) on inference results to reject overlapping bounding boxes
 
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
-    print("Calling the default non_max_suppression")
-
     bs = prediction.shape[0]  # batch size
     nc = prediction.shape[2] - 5  # number of classes  ## first 5 elements in this dimension2 might be xyxy & score
     xc = prediction[..., 4] > conf_thres  # candidates
@@ -801,10 +800,6 @@ def non_max_suppression(prediction,
         if classes is not None:
             x = x[(x[:, 5:6] == torch.tensor(classes, device=x.device)).any(1)]
 
-        # Apply finite constraint
-        # if not torch.isfinite(x).all():
-        #     x = x[torch.isfinite(x).all(1)]
-
         # Check shape
         n = x.shape[0]  # number of boxes
         if not n:  # no boxes
@@ -815,11 +810,12 @@ def non_max_suppression(prediction,
         # Batched NMS
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-        # i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
-        # ## i is a tensor with the indices of the elements that have been kept by NMS, sorted in decreasing order of scores
-        
-        ## not applying default nms, we keep the entire tensor x
-        i = torch.tensor(range(x.shape[0]))
+        if apply_original_nms:
+            i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+            ## i is a tensor with the indices of the elements that have been kept by NMS, sorted in decreasing order of scores
+        else:
+            ## not applying default nms, we keep the entire tensor x
+            i = torch.tensor(range(x.shape[0]))
 
         if i.shape[0] > max_det:  # limit detections
             i = i[:max_det]
