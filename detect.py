@@ -78,7 +78,13 @@ def run(
         hide_conf=False,  # hide confidences
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
+        use_seq_nms=False,  # use seq_nms
+        use_modified_seq_nms=False  # use modified seq_nms
 ):
+    apply_original_nms = True
+    if use_seq_nms or use_modified_seq_nms:
+        apply_original_nms = False
+
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     save_img = False  ## debugging mode
@@ -137,17 +143,15 @@ def run(
         dt[1] += t3 - t2
 
         # NMS
-        pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+        pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det, apply_original_nms=apply_original_nms)
         dt[2] += time_sync() - t3
 
+        ## add detected bboxes to lists
         bboxes = pred[0][..., :4]
         scores = pred[0][..., 4]
         seq_bboxes.append(bboxes)
         seq_scores.append(scores)
         max_num_bboxes = max(max_num_bboxes, bboxes.shape[0])
-
-        # Second-stage classifier (optional)
-        # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
 
         # Process predictions
         for i, det in enumerate(pred):  # per image
@@ -228,24 +232,38 @@ def run(
         for j in range(seq_bboxes[i].shape[0]): # each bbox in the frame
             padded_bboxes[i][j] = seq_bboxes[i][j]
 
-    best_pred_bboxes_seq = seq_nms(padded_bboxes, padded_scores)
-    # seq_nms() updates padded_bboxes and padded_scores
+    if use_seq_nms or use_modified_seq_nms:
+        t_1 = time_sync()
+        best_pred_bboxes_seq = seq_nms(padded_bboxes, padded_scores, use_modified_seq_nms=use_modified_seq_nms)
+        t_2 = time_sync()
+        print(f'{t_2 - t_1:.3f}s for seq_nms')
 
-    # turn into a dictionary of key as frame_idx, and value as list of tuples (x1,y1,x2,y2,score)
-    pred_bboxes_seq = {}
-    ## and save best_seqs into file
-    with open(str(save_dir / 'seq_nms_results.txt'), 'a') as f:
-        for frame_idx, seq in best_pred_bboxes_seq.items():  # key value pair
-            pred_bboxes_seq[frame_idx] = []
-            for bbox, score in seq:
-                pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), score.item()))
-                f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame
-            f.write('\n')
+        # turn into a dictionary of key as frame_idx, and value as list of tuples (x1,y1,x2,y2,score)
+        pred_bboxes_seq = {}
+        ## and save best_seqs into file
+        with open(str(save_dir / 'seq_nms_results.txt'), 'a') as f:
+            for frame_idx, seq in best_pred_bboxes_seq.items():  # key value pair
+                pred_bboxes_seq[frame_idx] = []
+                for bbox, score in seq:
+                    pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), score.item()))
+                    f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame
+                f.write('\n')
+    else:
+        # seq_bboxes = [tensor([[420.,   5., 613., 187.], 
+        #                       [...]]), 
+        #               tensor([[421.,  13., 614., 197.]]), ... ]
+        # seq_scores = [tensor([0.38223]), tensor([0.47908]), ...]
+        pred_bboxes_seq = {}
+        with open(str(save_dir / 'nms_results.txt'), 'a') as f:
+            for frame_idx, frame in enumerate(pred_bboxes_seq):
+                pred_bboxes_seq[frame_idx] = []
+                for i, bbox in enumerate(seq_bboxes):
+                    pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), seq_scores[i].item()))
+                    f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame  
 
-    ## TODO: use the class label for seq_nms() and save the results to file 
-    # TODO: visualize the seq_nms results
-
-    # evaluate seq_nms output
+    # pred_bboxes_seq =
+    # {0: [(420.0, 5.0, 613.0, 187.0, 0.5108696222305298)], 
+    #  1: [(421.0, 13.0, 614.0, 197.0, 0.5108696222305298)],
 
     gt_bboxes_seq = {}
     num_gt = 0
@@ -266,10 +284,11 @@ def run(
                 x1, y1, x2, y2, cls = [int(x) for x in bbox.split(',')]
                 gt_bboxes_seq[frame_idx].append((x1, y1, x2, y2, cls))
                 num_gt += 1
-
             frame_idx += 1
     print("pred_bboxes_seq: ", pred_bboxes_seq)
     print("gt_bboxes_seq: ", gt_bboxes_seq)
+
+    ## evaluate performance
 
     # get the number of true postives, number of detections (pred) and number of gt bboxes in the sequence
     num_tp = 0
@@ -344,6 +363,8 @@ def parse_opt():
     parser.add_argument('--hide-conf', default=False, action='store_true', help='hide confidences')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
+    parser.add_argument('--use_seq_nms', action='store_true', help='apply seq-nms')
+    parser.add_argument('--use_modified_seq_nms', action='store_true', help='apply modified seq-nms')
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))
