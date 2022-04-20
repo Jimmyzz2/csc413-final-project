@@ -5,22 +5,12 @@ class_id_to_index = {'n02691156': 1, 'n02419796': 2, 'n02131653': 3, 'n02834778'
     'n02355227': 24, 'n02129604': 25, 'n04468005': 26, 'n01662784': 27, 'n04530566': 28, 'n02062744': 29, 'n02391049': 30}
 
 import xml.etree.ElementTree as ET
-import torch
 
 
 '''
 One annotation refers to one frame in ground truth. 
 One label refers to one text file for one frame 
 '''
-
-def xyxy2xywhn(x, w=640, h=640):
-    # Convert x1, y1, x2, y2 to x, y, w, h normalized where xy1=top-left, xy2=bottom-right
-    y = x.clone()  # assume input is torch.tensor
-    y[:, 0] = ((x[:, 0] + x[:, 2]) / 2) / w  # x center
-    y[:, 1] = ((x[:, 1] + x[:, 3]) / 2) / h  # y center
-    y[:, 2] = (x[:, 2] - x[:, 0]) / w  # width
-    y[:, 3] = (x[:, 3] - x[:, 1]) / h  # height
-    return y
 
 def extract_from_xml(filename):
     tree = ET.parse(filename)  #xmlfile
@@ -29,24 +19,15 @@ def extract_from_xml(filename):
     width = int(root[3][0].text)
     height = int(root[3][1].text)
     # extract detections (tag with name equals object)
-    annotation = []  # contains [x1, y1, x2, y2] unnormalized
-    index = []  # contains id
+    annotation = []  # contains [id, x_min, y_min, x_max, y_max]
     for elem in root:
         if elem.tag == "object":
-            index.append([int(class_id_to_index[elem[1].text])])
-            xmax = float(elem[2][0].text)
-            xmin = float(elem[2][1].text)
-            ymax = float(elem[2][2].text)
-            ymin = float(elem[2][3].text)
-            annotation.append([xmin, ymin, xmax, ymax])
-    return [torch.tensor(annotation), torch.tensor(index), width, height]
-
-def annotation_to_label(filename):
-    # convert annotation to label
-    annotation, index, width, height = extract_from_xml(filename)
-    label = xyxy2xywhn(annotation, width, height)  # num_detections x4 with [index, x, y, w, h]
-    label = torch.cat([index, label], dim=1)
-    return label
+            xmax = elem[2][0].text
+            xmin = elem[2][1].text
+            ymax = elem[2][2].text
+            ymin = elem[2][3].text
+            annotation.append([class_id_to_index[elem[1].text], xmin, ymin, xmax, ymax])
+    return annotation
 
 def write_label_to_txt(filename, label):
     '''
@@ -58,10 +39,7 @@ def write_label_to_txt(filename, label):
         for bbox in label:
             label_string = ""
             for i, elem in enumerate(bbox):  # [index, x, y, w, h]
-                if i == 0:  # elem = index
-                    label_string += str(int(elem.item()))  # convert index to int
-                else:
-                    label_string += str(elem.item())
+                label_string += str(elem)
                 label_string += " "
             label_string += "\n"
             f.write(label_string)
@@ -90,9 +68,9 @@ if __name__ == "__main__":
         zero_length = length - len(str(num))
         return '0' * zero_length + str(num)
     # get hand_pick_seq
-    hand_pick_seq = ['ILSVRC2015_val_00000001', 'ILSVRC2015_val_00000002', 'ILSVRC2015_val_00002000', 'ILSVRC2015_val_00005001', 'ILSVRC2015_val_00007006', 'ILSVRC2015_val_00010000']
-    hand_pick_seq_preferred_name = ['turtle-1-occlusion', 'turtle-2-occlusion', 'lizard-slow-move', 'multiple-zebras', 'jet-fast-move', 'zebra-occlusion']
-    hand_pick_seq_images = [364, 1, 91, 0, 143, 41]
+    hand_pick_seq = ['ILSVRC2015_val_00000000','ILSVRC2015_val_00000001', 'ILSVRC2015_val_00000002', 'ILSVRC2015_val_00002000', 'ILSVRC2015_val_00005001', 'ILSVRC2015_val_00007006', 'ILSVRC2015_val_00010000']
+    hand_pick_seq_preferred_name = ['the-turtle', 'turtle-1-occlusion', 'turtle-2-occlusion', 'lizard-slow-move', 'multiple-zebras', 'jet-fast-move', 'zebra-occlusion']
+    hand_pick_seq_images = [0, 364, 1, 91, 0, 143, 41]
     for i, seq in enumerate(hand_pick_seq): # e.g. ILSVRC2015_VID_val_00000000
         seq_path = os.path.join(VID_val_dir, seq)
         if os.path.isdir(seq_path):
@@ -119,14 +97,14 @@ if __name__ == "__main__":
                     follow_symlinks=True)
                 label_path = os.path.join(label_dir, image[:-4] + "txt")
                 # print(label_path)
-                write_label_to_txt(label_path, annotation_to_label(annotation_path))
+                write_label_to_txt(label_path, extract_from_xml(annotation_path))
 
     
     count_seq = 0
     for i, seq in enumerate(os.listdir(VID_val_dir)): # e.g. ILSVRC2015_VID_val_00000000
         if seq in hand_pick_seq: 
             continue
-        if count_seq >= 24:
+        if count_seq >= 23:
             break
         seq_path = os.path.join(VID_val_dir, seq)
         if os.path.isdir(seq_path):
@@ -160,7 +138,7 @@ if __name__ == "__main__":
                     follow_symlinks=True)
                 label_path = os.path.join(label_dir, image[:-4] + "txt")
                 # print(label_path)
-                write_label_to_txt(label_path, annotation_to_label(annotation_path))
+                write_label_to_txt(label_path, extract_from_xml(annotation_path))
                 count_image += 1
 
     # # train image path
