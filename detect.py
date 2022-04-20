@@ -48,6 +48,8 @@ from utils.torch_utils import select_device, time_sync
 from seq_nms import seq_nms  ## import seq_nms cloned from repo https://github.com/tmoopenn/seq-nms
 from torchvision.ops import box_iou
 import matplotlib.pyplot as plt
+from sklearn.metrics import average_precision_score
+from more_itertools import sort_together
 
 
 @torch.no_grad()
@@ -262,7 +264,7 @@ def run(
                     f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame  
 
     # pred_bboxes_seq =
-    # {0: [(420.0, 5.0, 613.0, 187.0, 0.5108696222305298)], 
+    # {0: [(420.0, 5.0, 613.0, 187.0, 0.5108696222305298), (...)], 
     #  1: [(421.0, 13.0, 614.0, 197.0, 0.5108696222305298)],
 
     gt_bboxes_seq = {}
@@ -290,26 +292,50 @@ def run(
 
     ## evaluate performance
 
-    # get the number of true postives, number of detections (pred) and number of gt bboxes in the sequence
-    num_tp = 0
-    num_pred = 0
-    precision_lst = []
-    recall_lst = []
+    # get the true positives and corresponding pred conf scores
+    # num_tp = 0
+    # num_pred = 0
+    is_tp_lst = []
+    scores = []
+    # precision_lst = []
+    # recall_lst = []
     for frame_idx in pred_bboxes_seq:
         # if IoU of predicted bbox and gt bbox is greater than threshold, then it is a true positive
         pred_bboxes_frame = pred_bboxes_seq[frame_idx]
-        num_pred += len(pred_bboxes_frame)
+        # num_pred += len(pred_bboxes_frame)
+        gt_bboxes_used = []
         for pred_bbox in pred_bboxes_frame:
             tensor_pred_bbox = torch.tensor(pred_bbox[:-1]).unsqueeze(0)
+            is_tp = False
             for gt_bbox in gt_bboxes_seq[frame_idx]:
                 tensor_gt_bbox = torch.tensor(gt_bbox[:-1]).unsqueeze(0)
                 iou_pred_gt = box_iou(tensor_pred_bbox, tensor_gt_bbox).squeeze().item()
                 print("iou_pred_gt: ", iou_pred_gt)
-                if iou_pred_gt > 0.85:  # TODO: try different thresholds
-                    num_tp += 1
+                if iou_pred_gt > 0.85 and (gt_bbox not in gt_bboxes_used):  # TODO: try different thresholds
+                    # num_tp += 1
+                    gt_bboxes_used.append(gt_bbox)
+                    is_tp = True
                     break
-            precision_lst.append(num_tp / num_pred)
-            recall_lst.append(num_tp / num_gt)
+            if is_tp:
+                is_tp_lst.append(1)
+            else:
+                is_tp_lst.append(0)
+            scores.append(pred_bbox[-1])
+            # precision_lst.append(num_tp / num_pred)
+            # recall_lst.append(num_tp / num_gt)
+    
+    # calculate precision & recall
+    scores, is_tp_lst = sort_together([scores, is_tp_lst])
+    print("scores", scores)
+    print("is_tp_lst", is_tp_lst)
+
+    precision_lst = []
+    recall_lst = []
+    for i in range(len(is_tp_lst)):
+        num_tp = sum(is_tp_lst[:i+1])
+        num_detections = i+1
+        precision_lst.append(num_tp / num_detections)
+        recall_lst.append(num_tp / num_gt)
     
     print("precision_lst: ", precision_lst)
     print("recall_lst: ", recall_lst)
@@ -321,9 +347,8 @@ def run(
     plt.savefig('PR_curve.png')
 
     # TODO: calculate the average precision (area under PR curve)
-
-    
-
+    ap = average_precision_score(is_tp_lst, scores)
+    print("AP of this sequence:", ap)
 
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
