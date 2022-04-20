@@ -77,34 +77,91 @@ if __name__ == "__main__":
 #     #                 '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/train/b.html', follow_symlinks=True)
 
 
-#     # extract one image from each training sequence
-#     VID_val_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val'
-#     VID_train_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000'
-#     VID_train_ann_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/train/ILSVRC2015_VID_train_0000'
-#     VID_val_ann_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/val'
-#     output_train_image_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/train/'
-#     output_val_image_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/val/'
-#     output_train_label_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/train/'
-#     output_val_label_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/val/'
+    # extract 100 images from 30 training sequence
+    # VID_train_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000'
+    # VID_train_ann_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/train/ILSVRC2015_VID_train_0000'
+    # output_train_image_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/images/VID/train/'
+    # output_train_label_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/datasets/ImageNetVID/labels/VID/train/'
+    VID_val_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val'
+    VID_val_ann_dir = '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/val'
+    output_val_image_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/test_sequences/images/'
+    output_val_label_dir = '/Users/jimmyzhan/Documents/csc413/csc413-final-project/test_sequences/labels/'
+    def add_zero(num, length=6):
+        zero_length = length - len(str(num))
+        return '0' * zero_length + str(num)
+    # get hand_pick_seq
+    hand_pick_seq = ['ILSVRC2015_val_00000001', 'ILSVRC2015_val_00000002', 'ILSVRC2015_val_00002000', 'ILSVRC2015_val_00005001', 'ILSVRC2015_val_00007006', 'ILSVRC2015_val_00010000']
+    hand_pick_seq_preferred_name = ['turtle-1-occlusion', 'turtle-2-occlusion', 'lizard-slow-move', 'multiple-zebras', 'jet-fast-move', 'zebra-occlusion']
+    hand_pick_seq_images = [364, 1, 91, 0, 143, 41]
+    for i, seq in enumerate(hand_pick_seq): # e.g. ILSVRC2015_VID_val_00000000
+        seq_path = os.path.join(VID_val_dir, seq)
+        if os.path.isdir(seq_path):
+            # create a seq folder for copied images
+            image_dir = os.path.join(output_val_image_dir, hand_pick_seq_preferred_name[i])
+            # print(image_dir)
+            os.mkdir(image_dir)
+            # create a seq folder for labels
+            label_dir = os.path.join(output_val_label_dir, hand_pick_seq_preferred_name[i])
+            # print(label_dir)
+            os.mkdir(label_dir)
+            for j in range(100): # 000000.JPEG
+                image = add_zero(hand_pick_seq_images[i]+j) + ".JPEG" # 000001.JPEG
+                seq_image = os.path.join(seq, image) # e.g. ILSVRC2015_val_00000000/000000.JPEG
+                image_path = os.path.join(VID_val_dir, seq_image)
+                # print(image_path)
+                annotation_path = os.path.join(VID_val_ann_dir, seq_image)[:-4] + "xml"
+                # print(annotation_path)
+                image_dest = os.path.join(image_dir, image)
+                # print(image_dest)
+                shutil.copyfile(
+                    image_path,
+                    image_dest,
+                    follow_symlinks=True)
+                label_path = os.path.join(label_dir, image[:-4] + "txt")
+                # print(label_path)
+                write_label_to_txt(label_path, annotation_to_label(annotation_path))
 
-#     for i, filename in enumerate(os.listdir(VID_train_dir)): # e.g. ILSVRC2015_VID_train_00000000
-#         f = os.path.join(VID_train_dir, filename)
-#         if os.path.isdir(f):
-#             end_part_image_0_name = filename + '-' + os.listdir(f)[0]  # e.g. ILSVRC2015_train_00000000-000000.JPEG
-#             end_part_image_0 = os.path.join(filename, os.listdir(f)[0]) # e.g. ILSVRC2015_train_00000000/000000.JPEG
-#             image_0 = os.path.join(VID_train_dir, end_part_image_0)
-#             # print(image_0)
-#             image_0_annotation = os.path.join(VID_train_ann_dir, end_part_image_0)[:-4] + "xml"
-#             # print(image_0_annotation)
-#             image_0_dest = output_train_image_dir + end_part_image_0_name
-#             # print(image_0_dest)
-#             shutil.copyfile(
-#                 image_0,
-#                 image_0_dest,
-#                 follow_symlinks=True)
-#             image_0_text = output_train_label_dir + end_part_image_0_name[:-4] + "txt"
-#             # print(image_0_text)
-#             write_label_to_txt(image_0_text, annotation_to_label(image_0_annotation))
+    
+    count_seq = 0
+    for i, seq in enumerate(os.listdir(VID_val_dir)): # e.g. ILSVRC2015_VID_val_00000000
+        if seq in hand_pick_seq: 
+            continue
+        if count_seq >= 24:
+            break
+        seq_path = os.path.join(VID_val_dir, seq)
+        if os.path.isdir(seq_path):
+            if len(os.listdir(seq_path)) < 100:
+                continue
+            count_seq += 1
+            # create a seq folder for copied images
+            image_dir = os.path.join(output_val_image_dir, seq)
+            # print(image_dir)
+            os.mkdir(image_dir)
+            # create a seq folder for labels
+            label_dir = os.path.join(output_val_label_dir, seq)
+            # print(label_dir)
+            os.mkdir(label_dir)
+            count_image = 0 
+            sorted_seq_dir = os.listdir(seq_path)
+            sorted_seq_dir.sort()
+            for image in sorted_seq_dir: # 000000.JPEG
+                if count_image >= 100:
+                    break
+                seq_image = os.path.join(seq, image) # e.g. ILSVRC2015_val_00000000/000000.JPEG
+                image_path = os.path.join(VID_val_dir, seq_image)
+                # print(image_path)
+                annotation_path = os.path.join(VID_val_ann_dir, seq_image)[:-4] + "xml"
+                # print(annotation_path)
+                image_dest = os.path.join(image_dir, image)
+                # print(image_dest)
+                shutil.copyfile(
+                    image_path,
+                    image_dest,
+                    follow_symlinks=True)
+                label_path = os.path.join(label_dir, image[:-4] + "txt")
+                # print(label_path)
+                write_label_to_txt(label_path, annotation_to_label(annotation_path))
+                count_image += 1
 
     # # train image path
     # '/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/train/ILSVRC2015_VID_train_0000/ILSVRC2015_train_00000000/000000.JPEG'
@@ -125,23 +182,23 @@ if __name__ == "__main__":
     #             write_label_to_txt(f[:-3] + "txt", annotation_to_label(f))
 
 
-    # extract turtle validation first 100 images, annotations
-    print("here")
-    for i, file in enumerate(os.listdir("/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val/ILSVRC2015_val_00000000")):
-        image = os.path.join("/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val/ILSVRC2015_val_00000000", file)
-        print(image)
-        end_part = file[:-4]
-        image_dest = "/Users/jimmyzhan/Documents/csc413/csc413-final-project/turtle-100/images/" + "turtle-" + file 
-        print(image_dest)
-        shutil.copyfile(
-                image,
-                image_dest,
-                follow_symlinks=True)
-        image_text = "/Users/jimmyzhan/Documents/csc413/csc413-final-project/turtle-100/labels/" + "turtle-" + end_part + "txt"
-        print(image_text)
-        image_annotation = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/val/ILSVRC2015_val_00000000', end_part + "xml")
-        print(image_annotation)
-        write_label_to_txt(image_text, annotation_to_label(image_annotation))
+    # # extract turtle validation first 100 images, annotations
+    # print("here")
+    # for i, file in enumerate(os.listdir("/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val/ILSVRC2015_val_00000000")):
+    #     image = os.path.join("/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Data/VID/val/ILSVRC2015_val_00000000", file)
+    #     print(image)
+    #     end_part = file[:-4]
+    #     image_dest = "/Users/jimmyzhan/Documents/csc413/csc413-final-project/turtle-100/images/" + "turtle-" + file 
+    #     print(image_dest)
+    #     shutil.copyfile(
+    #             image,
+    #             image_dest,
+    #             follow_symlinks=True)
+    #     image_text = "/Users/jimmyzhan/Documents/csc413/csc413-final-project/turtle-100/labels/" + "turtle-" + end_part + "txt"
+    #     print(image_text)
+    #     image_annotation = os.path.join('/Users/jimmyzhan/Documents/csc413/video_image_dataset/ILSVRC2015/Annotations/VID/val/ILSVRC2015_val_00000000', end_part + "xml")
+    #     print(image_annotation)
+    #     write_label_to_txt(image_text, annotation_to_label(image_annotation))
         
         
 
