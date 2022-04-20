@@ -272,10 +272,11 @@ def run(
             for f_idx, img_x in enumerate(dataset):
                 path, im, im0s, vid_cap, s = img_x
                 annotator = Annotator(im0s, line_width=line_thickness, example=str(names))
-                for v_bbox in pred_bboxes_seq[f_idx]:
-                    annotator.box_label(v_bbox[:4], label=str(v_bbox[4]), color=colors(c, True))
+                if f_idx in pred_bboxes_seq:
+                    for v_bbox in pred_bboxes_seq[f_idx]:
+                        annotator.box_label(v_bbox[:4], label=str(v_bbox[4]), color=colors(c, True))
                 img_path_output = str(save_dir / seq_nms_dir_name) + "/_" + str(f_idx) + ".JPEG"
-                print(img_path_output)
+                # print(img_path_output)
                 cv2.imwrite(img_path_output, annotator.result())
 
         else:
@@ -374,11 +375,13 @@ def run(
         plt.savefig(str(save_dir / 'PR_curve.png'))
 
         # calculate the average precision (area under PR curve)
-        ap = average_precision_score(is_tp_lst, scores)
+        if len(is_tp_lst) == 0:
+            ap = 0
+        else:
+            ap = average_precision_score(is_tp_lst, scores)
+            if not np.isnan(ap):
+                ap_sum += ap
         print("AP of this sequence", dest_dir_name ,":", ap)
-        if not np.isnan(ap):
-            ap_sum += ap
-        # print("partial ap_sum:", ap_sum)
 
         # Print results
         t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
