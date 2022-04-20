@@ -108,6 +108,7 @@ def run(
 
     # source dir contains img dirs, each img dir has frames from 1 video
     seq_i = 0
+    ap_sum = 0
     for img_folder in glob.glob(source + '/images/*'):  # run inference on each sequence
         dest_dir_name = img_folder.split('/')[-1]
         # Directories
@@ -358,7 +359,8 @@ def run(
 
         # TODO: calculate the average precision (area under PR curve)
         ap = average_precision_score(is_tp_lst, scores)
-        print("AP of this sequence:", ap)
+        print("AP of this sequence:",seq_i, ap)
+        ap_sum += ap
 
         # Print results
         t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
@@ -370,6 +372,10 @@ def run(
             strip_optimizer(weights)  # update model (to fix SourceChangeWarning)
         
         seq_i += 1
+    
+    print("number of total test sequences:", seq_i)
+    mean_ap = ap_sum / seq_i
+    print("mAP:", mean_ap)
 
 
 def parse_opt():
