@@ -45,11 +45,12 @@ from utils.general import (LOGGER, check_file, check_img_size, check_imshow, che
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, time_sync
 
-from seq_nms import seq_nms  ## import seq_nms cloned from repo https://github.com/tmoopenn/seq-nms
+from seq_nms import seq_nms
 from torchvision.ops import box_iou
 import matplotlib.pyplot as plt
 from sklearn.metrics import average_precision_score
 from more_itertools import sort_together
+import glob
 
 
 @torch.no_grad()
@@ -96,268 +97,275 @@ def run(
     if is_url and is_file:
         source = check_file(source)  # download
 
-    # Directories
-    save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
-    (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
-
     # Load model
     device = select_device(device)
     model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
     stride, names, pt = model.stride, model.names, model.pt
     imgsz = check_img_size(imgsz, s=stride)  # check image size
 
-    # Dataloader
-    if webcam:
-        view_img = check_imshow()
-        cudnn.benchmark = True  # set True to speed up constant image size inference
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt)
-        bs = len(dataset)  # batch_size
-    else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt)
-        bs = 1  # batch_size  ## Can modify batch_size or add as command line argument
-    vid_path, vid_writer = [None] * bs, [None] * bs
-
-    # Run inference
     model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
-    dt, seen = [0.0, 0.0, 0.0], 0
 
-    ## tensor for storing all bbox detections for all images in the sequence
-    ## this is the input tensor to seq_nms()
-    ## len(dataset) == num_frames
-    seq_bboxes = []  ## make into tensor of shape (num_frames, num_boxes, 4)
-    seq_scores = []  ## make into tensor of shape (num_frames, num_boxes)
-    max_num_bboxes = 0
+    # source dir contains img dirs, each img dir has frames from 1 video
+    seq_i = -1
+    for img_folder in glob.glob(source + '/*'):  # run inference on each sequence
+        dest_dir_name = img_folder.split('/')[-1]
+        seq_i += 1
+        # Directories
+        save_dir = Path(project) / (str(seq_i) + "_" + dest_dir_name)
+        print(save_dir)
+        (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
-    for path, im, im0s, vid_cap, s in dataset:
-        t1 = time_sync()
-        im = torch.from_numpy(im).to(device)
-        im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
-        im /= 255  # 0 - 255 to 0.0 - 1.0
-        if len(im.shape) == 3:
-            im = im[None]  # expand for batch dim
-        t2 = time_sync()
-        dt[0] += t2 - t1
+        # Dataloader
+        if webcam:  # not used
+            view_img = check_imshow()
+            cudnn.benchmark = True  # set True to speed up constant image size inference
+            dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt)
+            bs = len(dataset)  # batch_size
+        else:
+            dataset = LoadImages(img_folder, img_size=imgsz, stride=stride, auto=pt)
+            bs = 1  # batch_size  ## Can modify batch_size or add as command line argument
+        vid_path, vid_writer = [None] * bs, [None] * bs
 
-        # Inference
-        visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
-        pred = model(im, augment=augment, visualize=visualize)
-        t3 = time_sync()
-        dt[1] += t3 - t2
+        # Run inference
+        dt, seen = [0.0, 0.0, 0.0], 0
 
-        # NMS
-        pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det, apply_original_nms=apply_original_nms)
-        dt[2] += time_sync() - t3
+        ## tensor for storing all bbox detections for all images in the sequence
+        ## this is the input tensor to seq_nms()
+        ## len(dataset) == num_frames
+        seq_bboxes = []  ## make into tensor of shape (num_frames, num_boxes, 4)
+        seq_scores = []  ## make into tensor of shape (num_frames, num_boxes)
+        max_num_bboxes = 0
 
-        ## add detected bboxes to lists
-        bboxes = pred[0][..., :4]
-        scores = pred[0][..., 4]
-        seq_bboxes.append(bboxes)
-        seq_scores.append(scores)
-        max_num_bboxes = max(max_num_bboxes, bboxes.shape[0])
+        for path, im, im0s, vid_cap, s in dataset:
+            t1 = time_sync()
+            im = torch.from_numpy(im).to(device)
+            im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
+            im /= 255  # 0 - 255 to 0.0 - 1.0
+            if len(im.shape) == 3:
+                im = im[None]  # expand for batch dim
+            t2 = time_sync()
+            dt[0] += t2 - t1
 
-        # Process predictions
-        for i, det in enumerate(pred):  # per image
-            seen += 1
-            if webcam:  # batch_size >= 1
-                p, im0, frame = path[i], im0s[i].copy(), dataset.count
-                s += f'{i}: '
-            else:
-                p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
+            # Inference
+            visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
+            pred = model(im, augment=augment, visualize=visualize)
+            t3 = time_sync()
+            dt[1] += t3 - t2
 
-            p = Path(p)  # to Path
-            save_path = str(save_dir / p.name)  # im.jpg
-            txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
-            s += '%gx%g ' % im.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            imc = im0.copy() if save_crop else im0  # for save_crop
-            annotator = Annotator(im0, line_width=line_thickness, example=str(names))
-            if len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
+            # NMS
+            pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det, apply_original_nms=apply_original_nms)
+            dt[2] += time_sync() - t3
 
-                # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
-                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+            ## add detected bboxes to lists
+            bboxes = pred[0][..., :4]
+            scores = pred[0][..., 4]
+            seq_bboxes.append(bboxes)
+            seq_scores.append(scores)
+            max_num_bboxes = max(max_num_bboxes, bboxes.shape[0])
 
-                # Write results
-                for *xyxy, conf, cls in reversed(det):
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        ## Can save a different version into txt
-                        line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+            # Process predictions
+            for i, det in enumerate(pred):  # per image
+                seen += 1
+                if webcam:  # batch_size >= 1
+                    p, im0, frame = path[i], im0s[i].copy(), dataset.count
+                    s += f'{i}: '
+                else:
+                    p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
 
-                    if save_img or save_crop or view_img:  # Add bbox to image
-                        c = int(cls)  # integer class
-                        label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                        annotator.box_label(xyxy, label, color=colors(c, True))
-                        if save_crop:
-                            save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                p = Path(p)  # to Path
+                save_path = str(save_dir / p.name)  # im.jpg
+                txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
+                s += '%gx%g ' % im.shape[2:]  # print string
+                gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+                imc = im0.copy() if save_crop else im0  # for save_crop
+                annotator = Annotator(im0, line_width=line_thickness, example=str(names))
+                if len(det):
+                    # Rescale boxes from img_size to im0 size
+                    det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
 
-            # Stream results
-            im0 = annotator.result()
-            if view_img:
-                cv2.imshow(str(p), im0)
-                cv2.waitKey(1)  # 1 millisecond
+                    # Print results
+                    for c in det[:, -1].unique():
+                        n = (det[:, -1] == c).sum()  # detections per class
+                        s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
-            # Save results (image with detections)
-            if save_img:
-                if dataset.mode == 'image':
-                    cv2.imwrite(save_path, im0)
-                else:  # 'video' or 'stream'
-                    if vid_path[i] != save_path:  # new video
-                        vid_path[i] = save_path
-                        if isinstance(vid_writer[i], cv2.VideoWriter):
-                            vid_writer[i].release()  # release previous video writer
-                        if vid_cap:  # video
-                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        else:  # stream
-                            fps, w, h = 30, im0.shape[1], im0.shape[0]
-                        save_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix on results videos
-                        vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-                    vid_writer[i].write(im0)
+                    # Write results
+                    for *xyxy, conf, cls in reversed(det):
+                        if save_txt:  # Write to file
+                            xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                            ## Can save a different version into txt
+                            line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
+                            with open(txt_path + '.txt', 'a') as f:
+                                f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
-        # Print time (inference-only)
-        LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
+                        if save_img or save_crop or view_img:  # Add bbox to image
+                            c = int(cls)  # integer class
+                            label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
+                            annotator.box_label(xyxy, label, color=colors(c, True))
+                            if save_crop:
+                                save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
 
-    ## pad seq_bboxes and seq_scores with zeros by difference between max_num_bboxes and current seq_bboxes's frame
-    # len(seq_bboxes)==len(seq_scores)==len(dataset)==the number of image frames in the sequence
-    padded_bboxes = torch.zeros(len(seq_bboxes), max_num_bboxes, 4)
-    padded_scores = torch.zeros(len(seq_bboxes), max_num_bboxes)
-    for i in range(len(seq_bboxes)): # each frame
-        num_bboxes_this_frame = seq_bboxes[i].shape[0]
-        padded_scores[i][:num_bboxes_this_frame] = seq_scores[i]
-        for j in range(seq_bboxes[i].shape[0]): # each bbox in the frame
-            padded_bboxes[i][j] = seq_bboxes[i][j]
+                # Stream results
+                im0 = annotator.result()
+                if view_img:
+                    cv2.imshow(str(p), im0)
+                    cv2.waitKey(1)  # 1 millisecond
 
-    if use_seq_nms or use_modified_seq_nms:
-        t_1 = time_sync()
-        best_pred_bboxes_seq = seq_nms(padded_bboxes, padded_scores, use_modified_seq_nms=use_modified_seq_nms)
-        t_2 = time_sync()
-        print(f'{t_2 - t_1:.3f}s for seq_nms')
+                # Save results (image with detections)
+                if save_img:
+                    if dataset.mode == 'image':
+                        cv2.imwrite(save_path, im0)
+                    else:  # 'video' or 'stream'
+                        if vid_path[i] != save_path:  # new video
+                            vid_path[i] = save_path
+                            if isinstance(vid_writer[i], cv2.VideoWriter):
+                                vid_writer[i].release()  # release previous video writer
+                            if vid_cap:  # video
+                                fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                                w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                                h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                            else:  # stream
+                                fps, w, h = 30, im0.shape[1], im0.shape[0]
+                            save_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix on results videos
+                            vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+                        vid_writer[i].write(im0)
 
-        # turn into a dictionary of key as frame_idx, and value as list of tuples (x1,y1,x2,y2,score)
-        pred_bboxes_seq = {}
-        ## and save best_seqs into file
-        with open(str(save_dir / 'seq_nms_results.txt'), 'a') as f:
-            for frame_idx, seq in best_pred_bboxes_seq.items():  # key value pair
-                pred_bboxes_seq[frame_idx] = []
-                for bbox, score in seq:
-                    pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), score.item()))
-                    f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame
-                f.write('\n')
-    else:
-        # seq_bboxes = [tensor([[420.,   5., 613., 187.], 
-        #                       [...]]), 
-        #               tensor([[421.,  13., 614., 197.]]), ... ]
-        # seq_scores = [tensor([0.38223]), tensor([0.47908]), ...]
-        pred_bboxes_seq = {}
-        with open(str(save_dir / 'nms_results.txt'), 'a') as f:
-            for frame_idx, frame in enumerate(pred_bboxes_seq):
-                pred_bboxes_seq[frame_idx] = []
-                for i, bbox in enumerate(seq_bboxes):
-                    pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), seq_scores[i].item()))
-                    f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame  
+            # Print time (inference-only)
+            LOGGER.info(f'{s}Done. ({t3 - t2:.3f}s)')
 
-    # pred_bboxes_seq =
-    # {0: [(420.0, 5.0, 613.0, 187.0, 0.5108696222305298), (...)], 
-    #  1: [(421.0, 13.0, 614.0, 197.0, 0.5108696222305298)],
+        ## pad seq_bboxes and seq_scores with zeros by difference between max_num_bboxes and current seq_bboxes's frame
+        # len(seq_bboxes)==len(seq_scores)==len(dataset)==the number of image frames in the sequence
+        padded_bboxes = torch.zeros(len(seq_bboxes), max_num_bboxes, 4)
+        padded_scores = torch.zeros(len(seq_bboxes), max_num_bboxes)
+        for i in range(len(seq_bboxes)): # each frame
+            num_bboxes_this_frame = seq_bboxes[i].shape[0]
+            padded_scores[i][:num_bboxes_this_frame] = seq_scores[i]
+            for j in range(seq_bboxes[i].shape[0]): # each bbox in the frame
+                padded_bboxes[i][j] = seq_bboxes[i][j]
 
-    gt_bboxes_seq = {}
-    num_gt = 0
-    with open("turtle20_gt.txt", "r") as f:  # TODO: change to command line arg or etc.
-        frame_idx = 0
-        while True:  # while not at bottom of file
-            # read line
-            line = f.readline()  # represents one frame
-            # e.g. line = "val/ILSVRC2015_val_00000003/000083.JPEG 353,0,728,501,26 741,163,1045,552,26"
-            if not line:  # if line is empty (reaching end of file), break
-                f.close()
-                break
-            # split line into list
-            line = line.split(' ')
-            img_path = line[0]
-            gt_bboxes_seq[frame_idx] = []
-            for bbox in line[1:]:  # each bbox in the frame
-                x1, y1, x2, y2, cls = [int(x) for x in bbox.split(',')]
-                gt_bboxes_seq[frame_idx].append((x1, y1, x2, y2, cls))
-                num_gt += 1
-            frame_idx += 1
-    print("pred_bboxes_seq: ", pred_bboxes_seq)
-    print("gt_bboxes_seq: ", gt_bboxes_seq)
+        if use_seq_nms or use_modified_seq_nms:
+            t_1 = time_sync()
+            best_pred_bboxes_seq = seq_nms(padded_bboxes, padded_scores, use_modified_seq_nms=use_modified_seq_nms)
+            t_2 = time_sync()
+            print(f'{t_2 - t_1:.3f}s for seq_nms')
 
-    ## evaluate performance
+            # turn into a dictionary of key as frame_idx, and value as list of tuples (x1,y1,x2,y2,score)
+            pred_bboxes_seq = {}
+            ## and save best_seqs into file
+            with open(str(save_dir / 'seq_nms_results.txt'), 'a') as f:
+                for frame_idx, seq in best_pred_bboxes_seq.items():  # key value pair
+                    pred_bboxes_seq[frame_idx] = []
+                    for bbox, score in seq:
+                        pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), score.item()))
+                        f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame
+                    f.write('\n')
+        else:
+            # seq_bboxes = [tensor([[420.,   5., 613., 187.], 
+            #                       [...]]), 
+            #               tensor([[421.,  13., 614., 197.]]), ... ]
+            # seq_scores = [tensor([0.38223]), tensor([0.47908]), ...]
+            pred_bboxes_seq = {}
+            with open(str(save_dir / 'nms_results.txt'), 'a') as f:
+                for frame_idx, frame in enumerate(pred_bboxes_seq):
+                    pred_bboxes_seq[frame_idx] = []
+                    for i, bbox in enumerate(seq_bboxes):
+                        pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), seq_scores[i].item()))
+                        f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {score} ')  ## check for multi-bbox frame  
 
-    # get the true positives and corresponding pred conf scores
-    # num_tp = 0
-    # num_pred = 0
-    is_tp_lst = []
-    scores = []
-    # precision_lst = []
-    # recall_lst = []
-    for frame_idx in pred_bboxes_seq:
-        # if IoU of predicted bbox and gt bbox is greater than threshold, then it is a true positive
-        pred_bboxes_frame = pred_bboxes_seq[frame_idx]
-        # num_pred += len(pred_bboxes_frame)
-        gt_bboxes_used = []
-        for pred_bbox in pred_bboxes_frame:
-            tensor_pred_bbox = torch.tensor(pred_bbox[:-1]).unsqueeze(0)
-            is_tp = False
-            for gt_bbox in gt_bboxes_seq[frame_idx]:
-                tensor_gt_bbox = torch.tensor(gt_bbox[:-1]).unsqueeze(0)
-                iou_pred_gt = box_iou(tensor_pred_bbox, tensor_gt_bbox).squeeze().item()
-                print("iou_pred_gt: ", iou_pred_gt)
-                if iou_pred_gt > 0.85 and (gt_bbox not in gt_bboxes_used):  # TODO: try different thresholds
-                    # num_tp += 1
-                    gt_bboxes_used.append(gt_bbox)
-                    is_tp = True
+        # pred_bboxes_seq =
+        # {0: [(420.0, 5.0, 613.0, 187.0, 0.5108696222305298), (...)], 
+        #  1: [(421.0, 13.0, 614.0, 197.0, 0.5108696222305298)],
+
+        gt_bboxes_seq = {}
+        num_gt = 0
+        with open("turtle20_gt.txt", "r") as f:  # TODO: change to command line arg or etc.
+            frame_idx = 0
+            while True:  # while not at bottom of file
+                # read line
+                line = f.readline()  # represents one frame
+                # e.g. line = "val/ILSVRC2015_val_00000003/000083.JPEG 353,0,728,501,26 741,163,1045,552,26"
+                if not line:  # if line is empty (reaching end of file), break
+                    f.close()
                     break
-            if is_tp:
-                is_tp_lst.append(1)
-            else:
-                is_tp_lst.append(0)
-            scores.append(pred_bbox[-1])
-            # precision_lst.append(num_tp / num_pred)
-            # recall_lst.append(num_tp / num_gt)
-    
-    # calculate precision & recall
-    scores, is_tp_lst = sort_together([scores, is_tp_lst])
-    print("scores", scores)
-    print("is_tp_lst", is_tp_lst)
+                # split line into list
+                line = line.split(' ')
+                img_path = line[0]
+                gt_bboxes_seq[frame_idx] = []
+                for bbox in line[1:]:  # each bbox in the frame
+                    x1, y1, x2, y2, cls = [int(x) for x in bbox.split(',')]
+                    gt_bboxes_seq[frame_idx].append((x1, y1, x2, y2, cls))
+                    num_gt += 1
+                frame_idx += 1
+        print("pred_bboxes_seq: ", pred_bboxes_seq)
+        print("gt_bboxes_seq: ", gt_bboxes_seq)
 
-    precision_lst = []
-    recall_lst = []
-    for i in range(len(is_tp_lst)):
-        num_tp = sum(is_tp_lst[:i+1])
-        num_detections = i+1
-        precision_lst.append(num_tp / num_detections)
-        recall_lst.append(num_tp / num_gt)
-    
-    print("precision_lst: ", precision_lst)
-    print("recall_lst: ", recall_lst)
+        ## evaluate performance
 
-    # plot pr curve
-    plt.plot(recall_lst, precision_lst)
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.savefig('PR_curve.png')
+        # get the true positives and corresponding pred conf scores
+        # num_tp = 0
+        # num_pred = 0
+        is_tp_lst = []
+        scores = []
+        # precision_lst = []
+        # recall_lst = []
+        for frame_idx in pred_bboxes_seq:
+            # if IoU of predicted bbox and gt bbox is greater than threshold, then it is a true positive
+            pred_bboxes_frame = pred_bboxes_seq[frame_idx]
+            # num_pred += len(pred_bboxes_frame)
+            gt_bboxes_used = []
+            for pred_bbox in pred_bboxes_frame:
+                tensor_pred_bbox = torch.tensor(pred_bbox[:-1]).unsqueeze(0)
+                is_tp = False
+                for gt_bbox in gt_bboxes_seq[frame_idx]:
+                    tensor_gt_bbox = torch.tensor(gt_bbox[:-1]).unsqueeze(0)
+                    iou_pred_gt = box_iou(tensor_pred_bbox, tensor_gt_bbox).squeeze().item()
+                    print("iou_pred_gt: ", iou_pred_gt)
+                    if iou_pred_gt > 0.85 and (gt_bbox not in gt_bboxes_used):  # TODO: try different thresholds
+                        # num_tp += 1
+                        gt_bboxes_used.append(gt_bbox)
+                        is_tp = True
+                        break
+                if is_tp:
+                    is_tp_lst.append(1)
+                else:
+                    is_tp_lst.append(0)
+                scores.append(pred_bbox[-1])
+                # precision_lst.append(num_tp / num_pred)
+                # recall_lst.append(num_tp / num_gt)
+        
+        # calculate precision & recall
+        scores, is_tp_lst = sort_together([scores, is_tp_lst])
+        print("scores", scores)
+        print("is_tp_lst", is_tp_lst)
 
-    # TODO: calculate the average precision (area under PR curve)
-    ap = average_precision_score(is_tp_lst, scores)
-    print("AP of this sequence:", ap)
+        precision_lst = []
+        recall_lst = []
+        for i in range(len(is_tp_lst)):
+            num_tp = sum(is_tp_lst[:i+1])
+            num_detections = i+1
+            precision_lst.append(num_tp / num_detections)
+            recall_lst.append(num_tp / num_gt)
+        
+        print("precision_lst: ", precision_lst)
+        print("recall_lst: ", recall_lst)
 
-    # Print results
-    t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
-    LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}' % t)
-    if save_txt or save_img:
-        s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
-        LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
-    if update:
-        strip_optimizer(weights)  # update model (to fix SourceChangeWarning)
+        # plot pr curve
+        plt.plot(recall_lst, precision_lst)
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.savefig('PR_curve.png')
+
+        # TODO: calculate the average precision (area under PR curve)
+        ap = average_precision_score(is_tp_lst, scores)
+        print("AP of this sequence:", ap)
+
+        # Print results
+        t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
+        LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}' % t)
+        if save_txt or save_img:
+            s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
+            LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
+        if update:
+            strip_optimizer(weights)  # update model (to fix SourceChangeWarning)
 
 
 def parse_opt():

@@ -1,11 +1,8 @@
-# -*- coding: utf-8 -*-
-
 import numpy as np
 import copy
 
 from torchvision.ops import box_iou
 import torch
-
 
 def seq_nms(boxes, scores, labels=None, linkage_threshold=0.5, nms_threshold=0.3, score_metric='max', use_modified_seq_nms=False):
     ''' Filter detections using the seq-nms algorithm. Boxes and classifications should be organized sequentially along the first dimension 
@@ -283,3 +280,6 @@ def _seq_nms(box_graph, boxes, scores, nms_threshold, use_modified_seq_nms):
                     num_middle_bboxes += 1
         
     return best_seqs
+
+
+## some code from https://github.com/tmoopenn/seq-nms
