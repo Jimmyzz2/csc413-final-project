@@ -291,7 +291,7 @@ def run(
                 for frame_idx, frame in enumerate(seq_bboxes):
                     pred_bboxes_seq[frame_idx] = []
                     for i, bbox in enumerate(seq_bboxes[frame_idx]):
-                        b_score = seq_scores[i].item()
+                        b_score = seq_scores[frame_idx][i].item()
                         pred_bboxes_seq[frame_idx].append((bbox[0].item(), bbox[1].item(), bbox[2].item(), bbox[3].item(), b_score))
                         f.write(f'{frame_idx} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} {b_score} ')  ## check for multi-bbox frame  
 
